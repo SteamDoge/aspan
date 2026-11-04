@@ -4,146 +4,170 @@
 
 # ASpan
 
-**把生活中的周期、余额与有效期，放在一起。**
+**Your cycles, balances and expiry dates, in one place.**
 
-离线的时间与资源管理应用，使用 Flutter 与 Rust 构建。
+An offline app for time and resource tracking, built with Flutter and Rust.
 
-[![License](https://img.shields.io/badge/license-AGPL--3.0--only-00AEEF?style=flat-square)](LICENSE) [![Platforms](https://img.shields.io/badge/platforms-Android%20%7C%20Windows-315CD8?style=flat-square)](#download) [![Release](https://img.shields.io/badge/release-rc0.0.5-AD6800?style=flat-square)](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.5)
+[![Release](https://img.shields.io/github/v/release/SteamDoge/aspan?include_prereleases&style=flat-square&label=release)](https://github.com/SteamDoge/aspan/releases) [![Downloads](https://img.shields.io/github/downloads/SteamDoge/aspan/total?style=flat-square&logo=github)](https://github.com/SteamDoge/aspan/releases) [![License](https://img.shields.io/badge/license-AGPL--3.0--only-00AEEF?style=flat-square)](LICENSE)<br>
+![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white) ![Windows](https://img.shields.io/badge/Windows-0078D4?logo=windows&logoColor=white)
 
-[功能](#features) · [界面预览](#preview) · [下载](#download) · [从源码构建](#build) · [反馈](#feedback)
+**[Download](#download)** &nbsp;·&nbsp; **[Features](#features)** &nbsp;·&nbsp; **[Getting started](#getting-started)** &nbsp;·&nbsp; **[Build from source](#build-from-source)** &nbsp;·&nbsp; **[Issues](https://github.com/SteamDoge/aspan/issues)**
+
+**English** · [简体中文](README.zh-CN.md)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/preview-dark.png">
+  <img src="docs/images/preview-light.png" alt="The ASpan Home, Projects and Me pages, shown in light and dark themes" width="900">
+</picture>
+
+<sub>Home · Projects · Me. Screenshots use sample data and come from UI tests; they are not device acceptance results.</sub>
 
 </div>
 
-<a id="preview"></a>
+## Is ASpan for you?
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/preview-dark.png">
-    <img src="docs/images/preview-light.png" alt="ASpan 的主页、项目分类和外观设置，展示浅色与深色主题" width="100%">
-  </picture>
-</p>
+Subscription renewals, document expiry dates, prepaid passes and home maintenance checks tend to live in different places: a calendar, a notes app, several other apps. It's hard to see what is due and how much is left. ASpan keeps them in one local app:
 
-<p align="center"><sub>主页 · 项目 · 我的。截图使用示例数据，由界面测试生成；不代表各设备的实机验收结果。</sub></p>
+- **See what needs attention**: the Home page lists the items due in the current period.
+- **Track dates and amounts together**: balances, counts and expiry dates sit next to each cycle.
+- **Keep a record of every change**: top-ups, charges and corrections all leave an entry you can review.
+- **No account, no network**: your data stays on your device.
 
-<a id="features"></a>
+It's for you if you want recurring tasks and remaining amounts in one place. If you need system notifications, reminders at an exact time or sync between devices, it doesn't do that yet. The interface is currently in Simplified Chinese only. Runs on Android 7.0+ and Windows 10/11 x64.
 
-## 功能
+## Features
 
-- **一个入口管理日常周期**：订阅缴费、待办、生日、检查维护、次数卡与证件有效期，内置 23 个场景模板，也可保存自己的模板。
-- **日期与资源一起看**：单次、日、周、月、年及完成后重置等周期，配合余额、次数和有效期，查看当前期进度与应用内提醒计划。
-- **把事情整理清楚**：用项目和标签分类，搜索全部规则，将相关规则合并展示，并保留各自的历史。
-- **每次变动都有记录**：确认完成、充值或扣费后记录流水；纠错保留原始记录与修正过程，预测不会直接记账。
-- **数据保存在本机**：SQLite 存储，支持导出和恢复完整 JSON 备份；恢复前检查备份，并保留恢复前检查点。
-- **适应手机与桌面**：澄光、纸境、墨序、曜夜四套配色，独立明暗模式，窄屏悬浮导航与宽屏侧栏。
+- **One place for everyday cycles**: subscriptions and bills, to-dos, birthdays, maintenance checks, prepaid passes and document expiry dates; 23 built-in templates, and you can save your own.
+- **Dates and resources side by side**: one-off, daily, weekly, monthly, yearly and reset-on-completion cycles, with balances, counts and expiry dates; see progress in the current period and the in-app reminder plan.
+- **Stay organized**: group rules by project and tag, search all rules, and show related rules together while each keeps its own history.
+- **A record of every change**: confirming, topping up or charging adds an entry; corrections keep the original entry and the fix, and forecasts never write to the ledger.
+- **Data stays on your device**: export and restore a full JSON backup; the backup is checked before restoring, and a checkpoint is kept from before the restore.
+- **Fits phones and desktops**: four color schemes, light and dark modes you can switch on their own, a floating navigation bar on narrow screens and a sidebar on wide ones.
+- **Open source**: original code under **AGPL-3.0-only**; third-party licenses and notices are kept intact.
 
-<a id="download"></a>
+The reminder plan is only shown inside the app. **System notifications, exact times, time zones/DST and automatic posting are not implemented yet.** There is no in-app way to roll back to a restore checkpoint yet. The interface is only available in Simplified Chinese. No feature needs an internet connection.
 
-## 下载
+## Download
 
-当前候选版：[**rc0.0.5**](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.5)（0.0.5-rc.1+9）。按平台选择下表附件，完整更新说明、校验清单与源码对应关系见版本页面。
+Current version: [**rc0.0.5**](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.5) (0.0.5-rc.1+9). See [all releases](https://github.com/SteamDoge/aspan/releases) for changes and packages.
 
-| 平台 | 支持范围 | 包格式与选择方式 |
+| Platform | Download | Which one |
 | --- | --- | --- |
-| Android | Android 7.0 / API 24 及以上，ARM64 | [![APK ARM64](https://img.shields.io/badge/APK-ARM64-168039?logo=android)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-android-arm64-v8a.apk)，多数当前 Android 手机 |
-| Android | Android 7.0 / API 24 及以上，x86_64 | [![APK x86_64](https://img.shields.io/badge/APK-x86__64-45BF55?logo=android)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-android-x86_64.apk)，对应设备或模拟器 |
-| Windows | Windows 10 / 11，x64 | [![Portable x64](https://img.shields.io/badge/Portable-x64-2D7D9A)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-windows-x64.zip)，解压运行 `aspan.exe`，保留 DLL 与 `data/` |
+| Android 7.0+ (API 24+) | [![APK ARM64](https://img.shields.io/badge/APK-ARM64-168039?logo=android)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-android-arm64-v8a.apk) | Most phones |
+| Android x86_64 | [![APK x86_64](https://img.shields.io/badge/APK-x86__64-45BF55?logo=android)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-android-x86_64.apk) | x86_64 devices and emulators |
+| Windows 10/11 x64 | [![Portable x64](https://img.shields.io/badge/Portable-x64-2D7D9A)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-windows-x64.zip) | Extract the whole folder and run `aspan.exe` |
 
-[SHA-256 校验清单](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/SHA256SUMS) · [所有版本](https://github.com/SteamDoge/aspan/releases)
+<sub>Extract the whole Windows portable package and keep the DLLs and `data/`. It is not code-signed, so Windows may warn you on first run. There are no ARMv7, Windows ARM64, macOS, Linux or iOS packages yet. ARM64 physical devices, the final Windows GUI and the full device matrix have not been verified; see the [release](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.5) for details. Check packages against [SHA256SUMS](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/SHA256SUMS).</sub>
 
-当前没有 ARMv7、Windows ARM64、macOS、Linux 或 iOS 版本。升级前请导出备份；Android 旧 Debug 签名不能直接覆盖，Windows 便携包未做代码签名。
+## Getting started
 
-## 开始使用
+**1 · Install.** On Android, install the APK for your device. On Windows, extract the portable ZIP and keep the DLLs and `data/` next to `aspan.exe`; copying only the EXE won't work.
 
-1. 在 **项目** 页新建规则，或选择场景模板，核对日期、周期与资源设置。
-2. 在 **主页** 查看需要处理的当前期，确认完成、充值、扣费或跳过。
-3. 在 **我的** 调整外观、管理模板，并定期导出完整备份。
+**2 · Add a rule.** On the **Projects** (项目) page, create a rule or pick a template, then check its dates, cycle and resource settings.<br><sub>A template keeps the dates it was saved with, so check them before use.</sub>
 
-模板会保留保存时的配置日期，使用前请核对。Windows 数据位于平台应用支持目录中的 `ASpan/v1/aspan.sqlite3`，Android 数据位于应用私有目录；卸载 Android 应用通常会清除数据，请先导出备份。
+**3 · Handle the current period.** On the **Home** (主页) page, see what is due and confirm, top up, charge or skip it.
 
-<a id="status"></a>
+**4 · Back up.** On the **Me** (我的) page, change the look, manage templates and export a full backup regularly.
 
-## 当前状态
+Export a backup before upgrading. An Android build signed with the old Debug key can't be upgraded in place by a new one. Uninstalling the Android app usually deletes its data, so don't uninstall in place of making a backup.
 
-当前源码版本：**0.0.5-rc.1+9**，处于候选阶段。
+## Build from source
 
-- 提醒计划目前仅在应用内展示；**系统通知、具体时刻、时区 / DST 和自动记账尚未实现**。
-- 公开源码已通过 Rust / Flutter 自动检查、Windows x64 Release 构建及 Android ARM64 / x86_64 Debug 构建。
-- rc0.0.5 原包已验证 Windows 随包 DLL / SQLite，以及 Android API 35 x86_64 的升级、导航与重开流程；ARM64 真机、最终 Windows GUI 与完整设备矩阵尚未验收。详细范围见 [Release](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.5)。
+<details>
+<summary>Show requirements, build commands and tests</summary>
 
-<a id="build"></a>
+### Requirements
 
-## 从源码构建
+This version was verified with **Flutter 3.47.7** (Dart 3.13.5), **Rust 1.98.1** and **PowerShell 7**. Dependency versions are locked in `Cargo.lock` and `apps/aspan/pubspec.lock`; the first dependency restore needs network access or a complete cache. The scripts build Windows and Android on a Windows host.
 
-已验证环境：**Flutter 3.47.7**（Dart 3.13.5）、**Rust 1.98.1**、**PowerShell 7**。当前脚本在 Windows 主机上构建 Windows 与 Android；依赖由 `Cargo.lock` 和 `pubspec.lock` 锁定。
+- Windows: Visual Studio with the Desktop development with C++ workload, the Windows SDK and the Rust MSVC toolchain. The scripts create plugin junctions, so the system must allow symbolic links or junctions.
+- Android: JDK 21, the Android SDK, NDK **28.2.13676358** and the Rust targets `aarch64-linux-android` and `x86_64-linux-android`; the project pins AGP 9.1.0, Kotlin 2.4.0 and Gradle 9.3.1, and the Gradle distribution SHA-256 is fixed.
+- Put `flutter` and `cargo` on the PATH of the current process, or pass `-Flutter` to the scripts. You can also set the `flutter`, `java` and `androidSdk` paths in the git-ignored `.tools/toolchains.json`; no SDK goes into the repository.
 
-| 目标 | 额外环境 |
-| --- | --- |
-| Windows x64 | Visual Studio“使用 C++ 的桌面开发”、Windows SDK、Rust MSVC 工具链 |
-| Android | JDK 21、Android SDK、NDK 28.2.13676358，Rust 目标 `aarch64-linux-android` 与 `x86_64-linux-android` |
+### Build
 
 ```powershell
 git clone https://github.com/SteamDoge/aspan.git
 cd aspan
-pwsh -File scripts/check.ps1
+
+# Development run: builds the Rust native library, then starts the Windows app
 pwsh -File scripts/run.ps1
-```
 
-将 `flutter`、`cargo` 放进当前进程的 PATH，或为脚本传入 `-Flutter`。首次恢复依赖需要网络或完整缓存；同一 Flutter 工程的检查与构建请串行执行。
-
-<details>
-<summary><b>构建 Windows / Android 安装包</b></summary>
-
-```powershell
+# Windows package
 pwsh -File scripts/build.ps1 -Platform windows
+
+# Android packages (Debug signing)
 pwsh -File scripts/build.ps1 -Platform android -Configuration Debug `
-  -AndroidSdk '<已安装的 Android SDK 目录>' -Java '<已安装的 JDK 目录>'
+  -AndroidSdk 'YOUR_ANDROID_SDK_DIR' -Java 'YOUR_JDK_DIR'
 ```
 
-Windows 输出：`apps/aspan/build/windows/x64/runner/Release/`。运行时保留整个目录的 DLL 与 `data/`。
+The Windows output is in `apps/aspan/build/windows/x64/runner/Release/`; keep the DLLs and `data/` from the whole folder. The Android output is in `apps/aspan/build/app/outputs/flutter-apk/`, split into ARM64 and x86_64. Running `flutter run` directly skips preparing the Rust library, so use `scripts/run.ps1`. Run checks and builds of the same Flutter project one at a time.
 
-Android 输出：`apps/aspan/build/app/outputs/flutter-apk/`，按 ARM64 与 x86_64 分包。当前使用 AGP 9.1.0、Kotlin 2.4.0、Gradle 9.3.1，Gradle 分发 SHA-256 已固定。Flutter 在构建时从 SDK 缓存补齐 Gradle wrapper 启动文件，仓库不重复存储 JAR 或生成脚本。
+### Android signing
 
-可在忽略入库的 `.tools/toolchains.json` 中设置 `flutter`、`java`、`androidSdk` 三个本机路径；无需将 SDK 放进仓库。Windows 插件链接由脚本创建，需要系统允许符号链接或 junction。
+Before a Release build, create and safely store your own signing key, then add the git-ignored `apps/aspan/android/key.properties`:
 
-**Android Release 签名**：在 `apps/aspan/android/key.properties` 配置自己的 `storeFile`、`storePassword`、`keyAlias`、`keyPassword`，使用 keystore 绝对路径，再将 `-Configuration Debug` 改为 `Release`。不要提交配置或私钥。不同证书签名的安装包无法直接覆盖升级，操作前先备份数据。
+```properties
+storeFile=C:/YOUR_PATH/your-release-key.jks
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=YOUR_KEY_ALIAS
+keyPassword=YOUR_KEY_PASSWORD
+```
 
-构建脚本只生成本地产物。对外发行须对应已提交的公开源码与明确 Tag，从该 Tag 的干净源码构建，并记录环境、签名身份与 SHA-256；安装包通过 Releases 附件分发。
+Use an absolute path for `storeFile`, then change `-Configuration Debug` to `Release` in the command above. These placeholders are not real credentials. Never commit this file or the key. A package signed with one certificate can't be installed over one signed with another; export a backup in the app first if you want to keep your data.
 
-</details>
+### Tests
 
-<details>
-<summary><b>架构、检查入口与数据说明</b></summary>
-
-| 目录 | 职责 |
-| --- | --- |
-| `apps/aspan` | Flutter 界面与平台交互，通过 `dart:ffi` 调用 `aspan_bridge` |
-| `crates/core` | 日期周期、规则、整数精度资源、幂等记账、纠错与完整性校验 |
-| `crates/runtime` | SQLite 事务、JSON C ABI、备份与 CLI |
-| `scripts` | 检查、运行与本地构建入口 |
-
-`scripts/check.ps1` 执行 Rust 格式、测试、Clippy、原生库构建及 Dart 格式、分析、Flutter 测试。`scripts/run.ps1` 构建原生库后运行 Windows 应用；直接运行 Flutter 会遗漏 Rust 库准备。`scripts/native-check.ps1` 使用独立临时数据执行 Windows 集成测试。
+Full check (Rust format, tests, Clippy and native library build; Dart format, Flutter analysis and tests):
 
 ```powershell
-pwsh -File scripts/native-check.ps1
-cargo test --workspace --locked
+pwsh -File scripts/check.ps1
 ```
 
-检查与构建使用 `--locked`、`--enforce-lockfile`。金额与资源使用整数最小单位；预测不写账本，删除规则保留已发生的流水，纠错追加反向和替代流水。
+Or step by step (the script also handles plugin junctions and dependency restore, so prefer it):
 
-导出 / 导入为版本化 JSON，导入上限 50 MiB；恢复前完整校验并保留检查点。目前没有检查点的应用内回退或自动淘汰入口。
+```powershell
+cargo fmt --all -- --check
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo build -p aspan-runtime --locked
+$env:ASPAN_RUST_LIB = (Resolve-Path target/debug/aspan_bridge.dll).Path
+Push-Location apps/aspan
+flutter pub get --enforce-lockfile
+dart format --output=none --set-exit-if-changed lib test integration_test
+flutter analyze
+flutter test
+Pop-Location
+```
+
+Run the Windows integration tests with `pwsh -File scripts/native-check.ps1`. They use separate temporary data and never touch personal data.
 
 </details>
 
-<a id="feedback"></a>
+## Project structure
 
-## 反馈与参与
+| Path | Responsibility |
+| --- | --- |
+| `apps/aspan` | Flutter UI and platform integration; calls the Rust native library through `dart:ffi` |
+| `crates/core` | Date cycles, rules, fixed-precision resources, idempotent posting, corrections and integrity checks |
+| `crates/runtime` | SQLite transactions, JSON C ABI, backups and CLI |
+| `scripts` | Checks, running, local builds and release candidate packaging and verification |
+| `licenses` | Third-party license texts |
 
-欢迎通过 [GitHub Issues](https://github.com/SteamDoge/aspan/issues) 报告问题或提出建议。反馈时请附上应用版本、平台、架构与复现步骤；日志和截图中请隐去个人数据。代码改进可通过 Pull Request 提交。
+## Privacy
 
-## 许可证
+ASpan doesn't go online. It needs no account, collects no usage statistics or crash reports, and has no feature that sends data anywhere. Rules, entries and settings are stored in a SQLite database on your device; only the JSON backups you export yourself leave the app.
 
-ASpan 应用代码采用 **AGPL-3.0-only**，完整许可证见 [LICENSE](LICENSE)，不附加禁止商用或限制修改的条款。
+<sub>On Windows, data is stored at `ASpan/v1/aspan.sqlite3` in the system's application support folder; on Android, it is in the app's private storage. Backup imports are limited to 50 MiB.</sub>
 
-第三方代码、Flutter 生成的平台模板、引擎、字体与素材保留各自的许可证和版权声明，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [licenses/](licenses/)。具体二进制发行仍须核对其包含的组件及运行库声明。
+## Feedback and contributing
 
-当前没有 HTML / JavaScript 插件机制；独立第三方插件的许可证与接口边界应分别判断。
+Report problems or ideas in [GitHub Issues](https://github.com/SteamDoge/aspan/issues). Include the app version, platform, architecture, steps to reproduce and what you expected; remove personal data from logs and screenshots first. Focused pull requests are welcome: start new original source files with `SPDX-License-Identifier: AGPL-3.0-only` and the copyright line, and run `pwsh -File scripts/check.ps1` before submitting.
+
+If ASpan is useful to you, a ⭐ helps others find it.
+
+## License
+
+The original code of this project is licensed under **AGPL-3.0-only**; the full official GNU text is in [LICENSE](LICENSE). There are no extra non-commercial or no-modification restrictions. If you distribute a modified version, or offer one to users over a network, follow the license's source-code obligations.
+
+Third-party code, dependencies, Flutter project templates, the engine, fonts and assets keep their own licenses and copyright notices (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/](licenses/)); this project's license does not change them. Each binary distribution still needs its bundled components and runtime library notices checked.
