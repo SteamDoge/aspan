@@ -28,12 +28,23 @@ void main() {
       ),
     );
     await store.refresh();
+    final today = DateTime.now();
+    await store.mutate('save_project', {'name': '手机卡与长期订阅'});
+    await store.mutate('save_tag', {'name': '家庭'});
     await store.mutate('save_rule', {
       'name': '一个较长的规则名称：手机套餐与资源生命周期',
+      'tags': [store.tags.single['id']],
+      'schedule': {
+        'anchor': dateOnly(today.subtract(const Duration(days: 20))),
+        'next': dateOnly(today.subtract(const Duration(days: 2))),
+        'cycle': {'kind': 'monthly'},
+      },
       'new_account': {
         'name': '手机余额',
         'unit': {'kind': 'money', 'code': 'CNY', 'precision': 2},
         'initial': '100',
+        'reference': '200',
+        'low': '150',
       },
     });
   });
@@ -61,12 +72,18 @@ void main() {
       for (final id in ['home', 'projects', 'profile']) {
         expect(find.byKey(ValueKey('nav-$id')), findsOneWidget);
       }
+      expect(find.byKey(const ValueKey('page-home')), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.text('项目').last);
+      await tester.tap(find.byKey(const ValueKey('nav-projects')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('page-projects')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('folder-all')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('page-all')), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.text('我的').last);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('nav-profile')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('page-profile')), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -84,21 +101,18 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(ASpanApp(store: store));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('nav-projects')));
-      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), '套餐');
       tester.view.physicalSize = const Size(1100, 800);
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('desktop-navigation')), findsOneWidget);
       expect(
-        tester.widget<TextField>(find.byType(TextField)).controller?.text ??
-            tester
-                .widget<EditableText>(find.byType(EditableText))
-                .controller
-                .text,
+        tester.widget<EditableText>(find.byType(EditableText)).controller.text,
         '套餐',
       );
       await tester.tap(find.byKey(const ValueKey('nav-profile')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('open-appearance')));
+      await tester.tap(find.byKey(const ValueKey('open-appearance')));
       await tester.pumpAndSettle();
       await tester.runAsync(() async {
         await tester.tap(find.byKey(const ValueKey('palette-folio')));
@@ -112,6 +126,8 @@ void main() {
         await store.refresh();
       });
       await tester.pumpAndSettle();
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
       final context = tester.element(find.byType(SpanNavigation));
       expect(Theme.of(context).brightness, Brightness.dark);
       expect(
@@ -122,7 +138,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('desktop-navigation')), findsNothing);
       expect(find.byKey(const ValueKey('page-profile')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('nav-projects')));
+      await tester.tap(find.byKey(const ValueKey('nav-home')));
       await tester.pumpAndSettle();
       expect(
         tester.widget<EditableText>(find.byType(EditableText)).controller.text,
@@ -257,7 +273,41 @@ void main() {
     },
   );
 
-  test('all AQ series palettes keep readable primary and secondary text', () {
+  testWidgets('collapsed title bar fill covers the bar and status area', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 47);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: spanTheme(Brightness.light),
+        home: SpanPage(
+          title: '测试',
+          slivers: [
+            boxes([
+              for (var i = 0; i < 60; i++)
+                SizedBox(height: 40, child: Text('行 $i')),
+            ]),
+          ],
+        ),
+      ),
+    );
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -600));
+    await tester.pumpAndSettle();
+    final fill = tester.getRect(find.byKey(const ValueKey('page-bar-fill')));
+    expect(fill.top, 0);
+    expect(fill.height, greaterThanOrEqualTo(47 + 52));
+    final bar = SpanColors.of(tester.element(find.byType(SpanPage))).bar;
+    final tint = find.byWidgetPredicate(
+      (w) => w is ColoredBox && w.color == bar,
+    );
+    expect(tester.getSize(tint).height, fill.height);
+    store.dispose();
+  });
+
+  test('all palettes keep readable primary and secondary text', () {
     double contrast(Color a, Color b) {
       final x = a.computeLuminance(), y = b.computeLuminance();
       return x > y ? (x + .05) / (y + .05) : (y + .05) / (x + .05);
@@ -266,16 +316,16 @@ void main() {
     for (final palette in SpanPalette.values) {
       for (final brightness in Brightness.values) {
         final (tokens, accent, text) = paletteColors(palette, brightness);
-        for (final surface in [
-          tokens.background,
-          tokens.backgroundEnd,
-          tokens.panel,
-          tokens.soft,
-        ]) {
+        for (final surface in [tokens.background, tokens.panel, tokens.soft]) {
           expect(contrast(text, surface), greaterThanOrEqualTo(4.5));
           expect(contrast(tokens.muted, surface), greaterThanOrEqualTo(4.5));
+          expect(contrast(accent, surface), greaterThanOrEqualTo(4.5));
         }
-        expect(contrast(accent, tokens.soft), greaterThanOrEqualTo(4.5));
+        for (final surface in [tokens.background, tokens.panel]) {
+          final filled = Color.alphaBlend(tokens.fill, surface);
+          expect(contrast(text, filled), greaterThanOrEqualTo(4.5));
+          expect(contrast(accent, filled), greaterThanOrEqualTo(4.5));
+        }
       }
     }
     expect(SpanPalette.parse('unknown'), SpanPalette.lucent);

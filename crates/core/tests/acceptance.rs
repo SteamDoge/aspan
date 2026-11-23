@@ -882,6 +882,39 @@ fn manual_replay_across_midnight_and_noop_settings_preserve_revision() {
 }
 
 #[test]
+fn home_setting_accepts_only_known_layouts_and_existing_places() {
+    let mut s = State::default();
+    let pid = run(&mut s, "save_project", json!({"name":"家庭"}));
+    let tid = run(&mut s, "save_tag", json!({"name":"每年"}));
+    for value in [
+        "due".to_string(),
+        "project".into(),
+        "tag".into(),
+        format!("project:{}", pid.as_str().unwrap()),
+        format!("tag:{}", tid.as_str().unwrap()),
+    ] {
+        run(&mut s, "setting", json!({"key":"home","value":value}));
+        assert_eq!(s.settings["home"], value);
+    }
+    for value in ["", "all", "project:missing", "tag:missing", "inbox:x"] {
+        assert!(
+            s.apply("setting", json!({"key":"home","value":value}), now())
+                .is_err(),
+            "{value}"
+        );
+    }
+    // Deleting the tag the home page shows returns home to the default.
+    run(&mut s, "delete_tag", json!({"id":tid}));
+    assert!(!s.settings.contains_key("home"));
+    // Deleting another tag keeps a folder choice.
+    let other = run(&mut s, "save_tag", json!({"name":"工作"}));
+    let folder = format!("project:{}", pid.as_str().unwrap());
+    run(&mut s, "setting", json!({"key":"home","value":folder}));
+    run(&mut s, "delete_tag", json!({"id":other}));
+    assert_eq!(s.settings["home"], folder);
+}
+
+#[test]
 fn merge_preserves_common_project_and_confirms_every_destination_change() {
     let mut s = State::default();
     let pid = run(&mut s, "save_project", json!({"name":"家庭"}));

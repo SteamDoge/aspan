@@ -2,6 +2,7 @@
 // Copyright (C) 2026 ASpan contributors.
 
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -60,12 +61,10 @@ String configSummary(Json c) {
   final kind = account?['unit']?['kind'];
   return [
     schedule == null ? '无周期' : cycleLabel(object(schedule['cycle'])),
-    if (kind == 'money') '金额账户 ${account!['unit']['code']}',
-    if (kind == 'count') '次数账户',
-    if (kind == 'quantity') '额度账户 ${account!['unit']['code']}',
+    if (kind == 'money') '金额 ${account!['unit']['code']}',
+    if (kind == 'count') '次数',
+    if (kind == 'quantity') '额度 ${account!['unit']['code']}',
     if (c['reset'] != null) '每期恢复额度',
-    if (schedule != null && c['reminder'] != null)
-      reminderSummary(object(c['reminder'])),
   ].join(' · ');
 }
 
@@ -76,11 +75,9 @@ Future<void> openCreator(
   String? project,
 }) async {
   if (rule != null) {
-    await Navigator.push(
+    await push<void>(
       context,
-      MaterialPageRoute<void>(
-        builder: (_) => RuleEditor(store: store, initial: rule, editing: true),
-      ),
+      RuleEditor(store: store, initial: rule, editing: true),
     );
     return;
   }
@@ -97,12 +94,7 @@ Future<void> openCreator(
   );
   if (choice != null && context.mounted) {
     choice['project'] = project;
-    await Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => RuleEditor(store: store, initial: choice),
-      ),
-    );
+    await push<void>(context, RuleEditor(store: store, initial: choice));
   }
 }
 
@@ -129,56 +121,43 @@ class TemplatePicker extends StatelessWidget {
       IconData icon,
       String title,
       String subtitle,
-      VoidCallback onTap, {
-      bool emphasized = false,
-    }) => ListTile(
-      leading: IconTile(
-        icon,
-        size: 36,
-        color: emphasized ? null : SpanColors.of(context).muted,
-      ),
+      VoidCallback onTap,
+    ) => ListTile(
+      leading: IconTile(icon),
       title: Text(title),
       subtitle: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
       onTap: onTap,
     );
     return SizedBox(
-      height: MediaQuery.sizeOf(context).height * .86,
+      height: MediaQuery.sizeOf(context).height * .88,
       child: ListView(
         padding: EdgeInsets.fromLTRB(
-          12,
+          16,
           0,
-          12,
+          16,
           16 + MediaQuery.viewPaddingOf(context).bottom,
         ),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('新建规则', style: theme.textTheme.titleLarge),
-                const SizedBox(height: 2),
-                Text(
-                  '模板只预填字段，创建的都是普通规则，所有字段均可修改。',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
+          Text(
+            '新建规则',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleLarge,
           ),
+          const SizedBox(height: 16),
           Panel(
             children: [
-              option(
-                Icons.add,
-                '空白创建',
-                '只开启你需要的时间、资源与提醒',
-                () => Navigator.pop(context, <String, dynamic>{}),
-                emphasized: true,
+              ValueRow(
+                '空白规则',
+                key: const ValueKey('blank-rule'),
+                icon: Icons.add,
+                onTap: () => Navigator.pop(context, <String, dynamic>{}),
               ),
             ],
           ),
           if (custom.isNotEmpty) ...[
-            const SectionHeader('我的模板', note: '保留保存时的日期，请核对'),
+            const SectionHeader('我的模板', large: false),
             Panel(
+              dividerIndent: 64,
               children: [
                 for (final t in custom)
                   option(
@@ -189,15 +168,17 @@ class TemplatePicker extends StatelessWidget {
                       context,
                       object(t['config'])
                         ..['guidance'] =
-                            '来自我的模板「${t['name']}」：模板保留保存时的配置日期，请核对本期日期与起点。',
+                            '来自我的模板「${t['name']}」：模板保留保存时的日期，请核对本期日期与起算日。',
                     ),
                   ),
               ],
             ),
+            const SectionFooter('模板保留保存时的日期，使用时请核对。'),
           ],
           for (final scene in order) ...[
-            SectionHeader(scene),
+            SectionHeader(scene, large: false),
             Panel(
+              dividerIndent: 64,
               children: [
                 for (final t in scenes[scene]!)
                   option(
@@ -206,11 +187,11 @@ class TemplatePicker extends StatelessWidget {
                     t['description'] as String? ??
                         configSummary(presetConfig(t)),
                     () => Navigator.pop(context, presetConfig(t)),
-                    emphasized: true,
                   ),
               ],
             ),
           ],
+          const SectionFooter('模板只预填内容，创建的都是普通规则，之后都能修改。'),
         ],
       ),
     );
@@ -226,6 +207,17 @@ String formatUnits(int value, int precision) {
   final raw = BigInt.from(value).abs().toString().padLeft(precision + 1, '0');
   return '${value < 0 ? '-' : ''}${precision == 0 ? raw : '${raw.substring(0, raw.length - precision)}.${raw.substring(raw.length - precision)}'}';
 }
+
+const _cycles = [
+  ('once', '单次'),
+  ('daily', '每日'),
+  ('weekly', '每周'),
+  ('monthly', '每月'),
+  ('yearly', '每年'),
+  ('interval', '每隔 N 天'),
+  ('restart', '完成后重新计时'),
+  ('calendar', '指定日期'),
+];
 
 class RuleEditor extends StatefulWidget {
   final SpanStore store;
@@ -357,43 +349,121 @@ class _RuleEditorState extends State<RuleEditor> {
       ? '次'
       : field('unit').text.trim();
 
+  String? validate(String key, String label, String? value, bool required) {
+    final text = value?.trim() ?? '';
+    if (required && text.isEmpty) return '请填写$label';
+    if (['precision', 'days', 'grace', 'repeat'].contains(key) &&
+        text.isNotEmpty) {
+      final n = int.tryParse(text);
+      final min = key == 'days' || key == 'repeat' ? 1 : 0;
+      final max = key == 'precision' ? 6 : 36500;
+      if (n == null || n < min || n > max) return '请输入 $min—$max 之间的整数';
+    }
+    if (key == 'amount' && text.startsWith(RegExp(r'[-+]'))) {
+      return '只填数值，方向由上方选项决定';
+    }
+    return null;
+  }
+
+  /// Label on the left, borderless value on the right.
   Widget input(
     String key,
     String label, {
     String? hint,
-    int lines = 1,
     bool numeric = false,
     bool required = false,
     String? suffix,
-    bool autofocus = false,
-  }) => TextFormField(
-    key: ValueKey('field-$key'),
-    controller: field(key),
-    maxLines: lines,
-    autofocus: autofocus,
-    keyboardType: numeric
-        ? const TextInputType.numberWithOptions(decimal: true, signed: true)
-        : TextInputType.text,
-    decoration: InputDecoration(
-      labelText: label,
-      helperText: hint,
-      suffixText: suffix,
+  }) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, right: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 112,
+            child: Text(label, style: theme.textTheme.bodyLarge),
+          ),
+          Expanded(
+            child: TextFormField(
+              key: ValueKey('field-$key'),
+              controller: field(key),
+              textAlign: TextAlign.end,
+              keyboardType: numeric
+                  ? const TextInputType.numberWithOptions(
+                      decimal: true,
+                      signed: true,
+                    )
+                  : TextInputType.text,
+              style: theme.textTheme.bodyLarge?.copyWith(fontFeatures: tabular),
+              decoration: _bare.copyWith(
+                hintText: hint ?? (required ? '必填' : '可选'),
+                suffixText: suffix,
+              ),
+              validator: (value) => validate(key, label, value, required),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static const _bare = InputDecoration(
+    filled: false,
+    isDense: true,
+    contentPadding: EdgeInsets.symmetric(vertical: 14),
+    border: InputBorder.none,
+    enabledBorder: InputBorder.none,
+    focusedBorder: InputBorder.none,
+    errorBorder: InputBorder.none,
+    focusedErrorBorder: InputBorder.none,
+  );
+
+  /// A row that opens a menu of choices.
+  Widget choice<T>({
+    required Key key,
+    required String label,
+    required T value,
+    required List<(T, String)> options,
+    required ValueChanged<T> onSelected,
+    String Function(T)? itemKey,
+  }) => PopupMenuButton<T>(
+    key: key,
+    tooltip: label,
+    onSelected: onSelected,
+    itemBuilder: (_) => [
+      for (final (v, l) in options)
+        CheckedPopupMenuItem(
+          key: itemKey == null ? null : ValueKey(itemKey(v)),
+          value: v,
+          checked: v == value,
+          child: Text(l),
+        ),
+    ],
+    child: ValueRow(
+      label,
+      value: options
+          .firstWhere((o) => o.$1 == value, orElse: () => options.first)
+          .$2,
+      trailing: Icon(
+        Icons.unfold_more_rounded,
+        size: 18,
+        color: SpanColors.of(context).muted,
+      ),
     ),
-    validator: (value) {
-      final text = value?.trim() ?? '';
-      if (required && text.isEmpty) return '请填写$label';
-      if (['precision', 'days', 'grace', 'repeat'].contains(key) &&
-          text.isNotEmpty) {
-        final n = int.tryParse(text);
-        final min = key == 'days' || key == 'repeat' ? 1 : 0;
-        final max = key == 'precision' ? 6 : 36500;
-        if (n == null || n < min || n > max) return '请输入 $min—$max 之间的整数';
-      }
-      if (key == 'amount' && text.startsWith(RegExp(r'[-+]'))) {
-        return '只填数值，方向由上方选项决定';
-      }
-      return null;
-    },
+  );
+
+  /// Label above a wrap of chips inside a card row.
+  Widget chips(String label, List<Widget> children) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.bodyLarge),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: children),
+      ],
+    ),
   );
 
   Json draft() {
@@ -468,7 +538,7 @@ class _RuleEditorState extends State<RuleEditor> {
 
   Future<void> save() async {
     if (!form.currentState!.validate()) {
-      setState(() => error = '请检查标出的字段');
+      setState(() => error = '请检查标出的内容');
       return;
     }
     setState(() {
@@ -536,7 +606,7 @@ class _RuleEditorState extends State<RuleEditor> {
     final n = int.tryParse(value ?? '');
     if (value == null) return;
     if (n == null || n < 0 || n > 36500) {
-      if (mounted) notify(context, '提醒节点须为 0—36500 的整数');
+      if (mounted) notify(context, '提醒天数须为 0—36500 的整数');
       return;
     }
     update(() {
@@ -561,380 +631,225 @@ class _RuleEditorState extends State<RuleEditor> {
     });
   }
 
-  Widget section(String title, {Widget? trailing, String? note}) =>
-      SectionHeader(
-        title,
-        note: note,
-        trailing: trailing,
-        padding: const EdgeInsets.fromLTRB(4, 28, 0, 10),
-      );
-
-  Widget dateRow({
-    required Key key,
-    required String label,
-    required String value,
-    required VoidCallback onTap,
-    String? detail,
-    IconData icon = Icons.calendar_today_outlined,
-  }) {
-    final theme = Theme.of(context);
-    final colors = SpanColors.of(context);
-    return Material(
-      color: colors.background,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: colors.line),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: key,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label, style: theme.textTheme.bodySmall),
-                    const SizedBox(height: 2),
-                    Text(value, style: theme.textTheme.titleMedium),
-                    if (detail != null)
-                      Text(detail, style: theme.textTheme.bodySmall),
-                  ],
-                ),
-              ),
-              Icon(icon, size: 20, color: theme.colorScheme.primary),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = SpanColors.of(context);
     final store = widget.store;
     final today = dateOnly(DateTime.now());
     final daysToNext = DateTime.parse(next)
         .difference(DateTime.parse(today))
         .inDays;
     final (addVerb, consumeVerb) = resourceVerbs(kind);
-    const gap = SizedBox(height: 12);
     final children = <Widget>[
       if (widget.initial['guidance'] != null) ...[
-        const SizedBox(height: 8),
         Callout(widget.initial['guidance'] as String),
+        const SizedBox(height: 12),
       ],
-      section('基本信息'),
-      input(
-        'name',
-        '名称',
-        required: true,
-        autofocus: !widget.editing && field('name').text.isEmpty,
-      ),
-      gap,
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      if (error != null) ...[
+        Callout(
+          error!,
+          icon: Icons.error_outline,
+          color: theme.colorScheme.error,
+        ),
+        const SizedBox(height: 12),
+      ],
+      Panel(
         children: [
-          for (final (key, label, data) in ruleIcons)
-            ChoiceChip(
-              key: ValueKey('icon-$key'),
-              label: Icon(
-                data,
-                size: 20,
-                semanticLabel: label,
-                color: icon == key ? theme.colorScheme.primary : null,
-              ),
-              selected: icon == key,
-              tooltip: label,
-              onSelected: (_) => update(() => icon = key),
+          TextFormField(
+            key: const ValueKey('field-name'),
+            controller: field('name'),
+            autofocus: !widget.editing && field('name').text.isEmpty,
+            style: theme.textTheme.titleLarge?.copyWith(fontSize: 20),
+            textInputAction: TextInputAction.next,
+            decoration: _bare.copyWith(
+              hintText: '名称',
+              contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
             ),
-        ],
-      ),
-      gap,
-      if (widget.initial['group'] == null)
-        DropdownButtonFormField<String>(
-          initialValue: project ?? '',
-          decoration: const InputDecoration(labelText: '所属小项目'),
-          items: [
-            const DropdownMenuItem(value: '', child: Text('未归类')),
-            for (final p in store.projects)
-              DropdownMenuItem(
-                value: p['id'] as String,
-                child: Text(p['name'] as String),
-              ),
-          ],
-          onChanged: (v) => update(() => project = v == '' ? null : v),
-        )
-      else
-        Text('归属随所在合并条目，在合并详情中移动。', style: theme.textTheme.bodySmall),
-      gap,
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final t in store.tags)
-            FilterChip(
-              label: Text('#${t['name']}'),
-              selected: tags.contains(t['id']),
-              onSelected: (v) => update(() {
-                v ? tags.add(t['id'] as String) : tags.remove(t['id']);
-              }),
+            validator: (value) => validate('name', '名称', value, true),
+          ),
+          TextFormField(
+            key: const ValueKey('field-notes'),
+            controller: field('notes'),
+            minLines: 1,
+            maxLines: 8,
+            style: theme.textTheme.bodyLarge,
+            decoration: _bare.copyWith(
+              hintText: '备注',
+              contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
             ),
-          ActionChip(
-            key: const ValueKey('create-tag'),
-            avatar: const Icon(Icons.add, size: 18),
-            label: Text(store.tags.isEmpty ? '添加标签' : '新标签'),
-            onPressed: createTag,
           ),
         ],
       ),
 
-      section(
-        '时间与周期',
-        trailing: Switch(
-          key: const ValueKey('toggle-timed'),
-          value: timed,
-          onChanged: (v) => update(() => timed = v),
-        ),
+      const SectionHeader('日期', large: false),
+      Panel(
+        children: [
+          SwitchRow(
+            '按日期管理',
+            switchKey: const ValueKey('toggle-timed'),
+            value: timed,
+            onChanged: (v) => update(() => timed = v),
+          ),
+          if (timed) ...[
+            ValueRow(
+              '本期事件日期',
+              key: const ValueKey('next-date'),
+              value: ended
+                  ? '周期已结束'
+                  : '${friendlyDate(next, weekday: false)} · ${relativeDays(daysToNext)}',
+              valueColor: ended ? null : theme.colorScheme.primary,
+              chevron: false,
+              onTap: () => pickDate(isNext: true),
+            ),
+            choice<String>(
+              key: const ValueKey('cycle-menu'),
+              label: '重复',
+              value: cycle,
+              options: _cycles,
+              itemKey: (v) => 'cycle-$v',
+              onSelected: (v) => update(() => cycle = v),
+            ),
+            if (cycle == 'interval' || cycle == 'restart')
+              input('days', '间隔', numeric: true, required: true, suffix: '天'),
+            if (cycle == 'calendar')
+              input('dates', '日期列表', hint: 'YYYY-MM-DD，逗号分隔'),
+            ValueRow(
+              '起算日',
+              key: const ValueKey('start-date'),
+              value: friendlyDate(start),
+              valueColor: theme.colorScheme.primary,
+              chevron: false,
+              onTap: () => pickDate(isNext: false),
+            ),
+          ],
+        ],
       ),
-      if (!timed) Text('不管理日期时，规则只记录资源与历史。', style: theme.textTheme.bodySmall),
+      SectionFooter(
+        !timed
+            ? '关闭后只记录资源与历史。'
+            : ended
+            ? '点按日期重新安排；只改名称等信息不会产生新的一期。'
+            : switch (cycle) {
+                'once' => '只发生一次，完成后结束。起算日用于计算进度。',
+                'restart' => '下一期从实际完成日期起算，适合充值保活、定期更换。',
+                'monthly' => '按自然月推进；月末日期在短月取当月最后一天。',
+                'yearly' => '按自然年推进；2 月 29 日在非闰年按 2 月末处理。',
+                'calendar' => '按列表中的日期依次推进，第一个日期应与本期日期一致。',
+                _ => '按计划日期推进，晚确认不会改变原周期。',
+              },
+      ),
+      if (timed && !ended && daysToNext < 0) ...[
+        const SizedBox(height: 10),
+        Callout(
+          '日期早于今天，保存后会立即显示为逾期或处理窗口。',
+          icon: Icons.warning_amber_rounded,
+          color: warningColor(context),
+        ),
+      ],
+
       if (timed) ...[
-        dateRow(
-          key: const ValueKey('next-date'),
-          label: '本期事件日期',
-          value: ended ? '周期已结束' : friendlyDate(next),
-          detail: ended ? '点按重新安排；只改名称等信息不会产生新一期' : relativeDays(daysToNext),
-          onTap: () => pickDate(isNext: true),
-        ),
-        if (!ended && daysToNext < 0) ...[
-          const SizedBox(height: 8),
-          Callout(
-            '日期早于今天，保存后会立即显示为逾期或处理窗口。',
-            icon: Icons.warning_amber_rounded,
-            color: warningColor(context),
-          ),
-        ],
-        gap,
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        const SectionHeader('提醒', large: false),
+        Panel(
           children: [
-            for (final (value, label) in const [
-              ('once', '单次'),
-              ('daily', '每日'),
-              ('weekly', '每周'),
-              ('monthly', '每月'),
-              ('yearly', '每年'),
-              ('interval', '每隔 N 天'),
-              ('restart', '完成后重计'),
-              ('calendar', '指定日期'),
-            ])
-              ChoiceChip(
-                key: ValueKey('cycle-$value'),
-                label: Text(label),
-                selected: cycle == value,
-                onSelected: (_) => update(() => cycle = value),
+            chips('提前提醒', [
+              for (final n in ({
+                30,
+                14,
+                7,
+                3,
+                1,
+                ...before,
+              }.toList()..sort((a, b) => b.compareTo(a))))
+                FilterChip(
+                  key: ValueKey('before-$n'),
+                  label: SpanChipLabel(
+                    n == 0 ? '当天' : '$n 天',
+                    selected: before.contains(n),
+                  ),
+                  selected: before.contains(n),
+                  onSelected: (v) => update(() {
+                    v ? before.add(n) : before.remove(n);
+                    before.sort((a, b) => b.compareTo(a));
+                  }),
+                ),
+              ActionChip(
+                avatar: const Icon(Icons.add, size: 18),
+                label: const Text('自定义'),
+                onPressed: addReminderDay,
               ),
+            ]),
+            SwitchRow(
+              '当天提醒',
+              value: onDay,
+              onChanged: (v) => update(() => onDay = v),
+            ),
+            input('grace', '处理窗口', numeric: true, required: true, suffix: '天'),
+            input('repeat', '窗口内重复', numeric: true, hint: '不重复', suffix: '天'),
           ],
         ),
-        const SizedBox(height: 8),
-        Text(switch (cycle) {
-          'once' => '只发生一次，完成后不再产生新一期。',
-          'restart' => '下一期从实际完成日期开始计算，例如充值保活。',
-          'monthly' => '按自然月推进；月末日期在短月夹到月底，之后恢复。',
-          'yearly' => '按自然年推进；2 月 29 日在非闰年按 2 月末处理。',
-          'calendar' => '按列表中的日期依次推进。',
-          _ => '按计划日历推进，晚确认不会改变原周期。',
-        }, style: theme.textTheme.bodySmall),
-        if (cycle == 'interval' || cycle == 'restart') ...[
-          gap,
-          input('days', '间隔天数', numeric: true, required: true, suffix: '天'),
-        ],
-        if (cycle == 'calendar') ...[
-          gap,
-          input('dates', '重复日期', hint: 'YYYY-MM-DD，以逗号分隔；首个日期与本期日期一致'),
-        ],
-        gap,
-        dateRow(
-          key: const ValueKey('start-date'),
-          label: '周期起点',
-          value: friendlyDate(start),
-          detail: '用于计算进度，通常是上次事件日',
-          icon: Icons.first_page,
-          onTap: () => pickDate(isNext: false),
-        ),
-
-        section('提醒', note: '应用内计划 · 系统通知尚未接入'),
-        Text('提前提醒', style: theme.textTheme.bodySmall),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final n in ({
-              30,
-              14,
-              7,
-              3,
-              1,
-              ...before,
-            }.toList()..sort((a, b) => b.compareTo(a))))
-              FilterChip(
-                key: ValueKey('before-$n'),
-                label: Text(n == 0 ? '当天' : '$n 天'),
-                selected: before.contains(n),
-                onSelected: (v) => update(() {
-                  v ? before.add(n) : before.remove(n);
-                  before.sort((a, b) => b.compareTo(a));
-                }),
-              ),
-            ActionChip(
-              avatar: const Icon(Icons.add, size: 18),
-              label: const Text('自定义'),
-              onPressed: addReminderDay,
-            ),
-          ],
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('事件当天提醒'),
-          value: onDay,
-          onChanged: (v) => update(() => onDay = v),
-        ),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: input(
-                'grace',
-                '处理窗口',
-                numeric: true,
-                required: true,
-                suffix: '天',
-                hint: '事件后仍可处理',
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: input(
-                'repeat',
-                '窗口内重复',
-                numeric: true,
-                suffix: '天',
-                hint: '留空不重复',
-              ),
-            ),
-          ],
-        ),
+        const SectionFooter('处理窗口是事件之后仍可处理的天数。提醒只在应用内显示，系统通知尚未接入。'),
       ],
 
-      section(
-        '资源账户',
-        trailing: Switch(
-          key: const ValueKey('toggle-resource'),
-          value: resource,
-          onChanged: (v) => update(() => resource = v),
-        ),
-      ),
-      if (!resource)
-        Text('金额、次数或有明确单位的额度；只管时间的事项不需要。', style: theme.textTheme.bodySmall),
-      if (resource) ...[
-        if (account != null)
-          Panel(
-            children: [
-              ListTile(
-                leading: const Icon(Icons.account_balance_wallet_outlined),
-                title: Text(store.state['accounts'][account]['name'] as String),
-                subtitle: Text(
-                  '当前 ${store.accountView(account!)['formatted']} ${store.accountView(account!)['unit']} · 余额在详情中调整',
-                ),
-              ),
-            ],
-          )
-        else ...[
-          SegmentedButton<String>(
-            key: const ValueKey('account-kind'),
-            segments: const [
-              ButtonSegment(value: 'money', label: Text('金额')),
-              ButtonSegment(value: 'count', label: Text('次数')),
-              ButtonSegment(value: 'quantity', label: Text('数量 / 额度')),
-            ],
-            selected: {kind},
-            showSelectedIcon: false,
-            onSelectionChanged: (v) => update(() => kind = v.first),
+      const SectionHeader('资源', large: false),
+      Panel(
+        children: [
+          SwitchRow(
+            '记录余额或次数',
+            switchKey: const ValueKey('toggle-resource'),
+            value: resource,
+            onChanged: (v) => update(() => resource = v),
           ),
-          gap,
-          if (kind == 'money')
-            DropdownButtonFormField<String>(
-              initialValue: unit,
-              decoration: const InputDecoration(labelText: '币种'),
-              items: [
-                for (final c
-                    in (store.snapshot['money_units'] as Map).keys
-                        .cast<String>())
-                  DropdownMenuItem(value: c, child: Text(c)),
-              ],
-              onChanged: (v) => update(() => unit = v!),
+          if (resource && account != null)
+            ValueRow(
+              store.state['accounts'][account]['name'] as String,
+              value:
+                  '${store.accountView(account!)['formatted']} ${store.accountView(account!)['unit']}',
             ),
-          if (kind == 'quantity')
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: input('unit', '单位', required: true, hint: '如 GB、积分'),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: input(
-                    'precision',
-                    '小数位数',
-                    numeric: true,
-                    required: true,
-                    hint: '0—6',
-                  ),
-                ),
-              ],
+          if (resource && account == null) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: SegmentedButton<String>(
+                key: const ValueKey('account-kind'),
+                segments: const [
+                  ButtonSegment(value: 'money', label: Text('金额')),
+                  ButtonSegment(value: 'count', label: Text('次数')),
+                  ButtonSegment(value: 'quantity', label: Text('额度')),
+                ],
+                selected: {kind},
+                showSelectedIcon: false,
+                onSelectionChanged: (v) => update(() => kind = v.first),
+              ),
             ),
-          if (kind != 'count') gap,
-          input(
-            'initial',
-            '初始余量',
-            numeric: true,
-            required: true,
-            suffix: unitCode,
-          ),
-          gap,
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: input(
-                  'reference',
-                  '参考总量',
-                  hint: '可选，用于显示剩余比例',
-                  numeric: true,
-                ),
+            if (kind == 'money')
+              choice<String>(
+                key: const ValueKey('currency-menu'),
+                label: '币种',
+                value: unit,
+                options: [
+                  for (final c
+                      in (store.snapshot['money_units'] as Map).keys
+                          .cast<String>())
+                    (c, c),
+                ],
+                onSelected: (v) => update(() => unit = v),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: input('low', '不足提醒', hint: '可选，低于即提示', numeric: true),
-              ),
+            if (kind == 'quantity') ...[
+              input('unit', '单位', required: true, hint: '如 GB、积分'),
+              input('precision', '小数位数', numeric: true, required: true),
             ],
-          ),
-        ],
-        if (timed) ...[
-          const SizedBox(height: 16),
-          Text('完成每一期时', style: theme.textTheme.bodySmall),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
+            input(
+              'initial',
+              '初始余量',
+              numeric: true,
+              required: true,
+              suffix: unitCode,
+            ),
+            input('reference', '参考总量', numeric: true),
+            input('low', '低于时提醒', numeric: true),
+          ],
+          if (resource && timed) ...[
+            chips('每期完成时', [
               for (final (value, label) in [
                 ('none', '不记录'),
                 ('consume', consumeVerb),
@@ -943,37 +858,76 @@ class _RuleEditorState extends State<RuleEditor> {
               ])
                 ChoiceChip(
                   key: ValueKey('change-$value'),
-                  label: Text(label),
+                  label: SpanChipLabel(label, selected: changeMode == value),
                   selected: changeMode == value,
                   onSelected: (_) => update(() => changeMode = value),
                 ),
-            ],
-          ),
-          if (changeMode != 'none') ...[
-            gap,
-            input(
-              'amount',
-              changeMode == 'reset'
-                  ? '恢复到'
-                  : changeMode == 'consume'
-                  ? '每期$consumeVerb'
-                  : '每期$addVerb',
-              numeric: true,
-              required: true,
-              suffix: unitCode,
-              hint: '确认完成时记入实际流水；预测不会改变余额',
-            ),
+            ]),
+            if (changeMode != 'none')
+              input(
+                'amount',
+                changeMode == 'reset'
+                    ? '恢复到'
+                    : changeMode == 'consume'
+                    ? '每期$consumeVerb'
+                    : '每期$addVerb',
+                numeric: true,
+                required: true,
+                suffix: unitCode,
+              ),
           ],
         ],
-      ],
+      ),
+      SectionFooter(
+        !resource
+            ? '金额、次数或有单位的额度；只管时间的事项不需要。'
+            : account != null
+            ? '余额在规则详情中调整。'
+            : '参考总量用于显示剩余比例。完成每期时记入实际流水，预测不会改变余额。',
+      ),
 
-      section('更多'),
-      input('notes', '备注', lines: 3),
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: const Text('在主页置顶'),
-        value: pinned,
-        onChanged: (v) => update(() => pinned = v),
+      const SectionHeader('整理', large: false),
+      Panel(
+        children: [
+          if (widget.initial['group'] == null)
+            choice<String>(
+              key: const ValueKey('project-menu'),
+              label: '文件夹',
+              value: project ?? '',
+              options: [
+                ('', '未归类'),
+                for (final p in store.projects)
+                  (p['id'] as String, p['name'] as String),
+              ],
+              onSelected: (v) => update(() => project = v == '' ? null : v),
+            )
+          else
+            const ValueRow('文件夹', value: '随所在合并条目'),
+          chips('标签', [
+            for (final t in store.tags)
+              FilterChip(
+                label: SpanChipLabel(
+                  '#${t['name']}',
+                  selected: tags.contains(t['id']),
+                ),
+                selected: tags.contains(t['id']),
+                onSelected: (v) => update(() {
+                  v ? tags.add(t['id'] as String) : tags.remove(t['id']);
+                }),
+              ),
+            ActionChip(
+              key: const ValueKey('create-tag'),
+              avatar: const Icon(Icons.add, size: 18),
+              label: Text(store.tags.isEmpty ? '添加标签' : '新标签'),
+              onPressed: createTag,
+            ),
+          ]),
+          SwitchRow(
+            '在主页置顶',
+            value: pinned,
+            onChanged: (v) => update(() => pinned = v),
+          ),
+        ],
       ),
     ];
     return PopScope(
@@ -982,46 +936,54 @@ class _RuleEditorState extends State<RuleEditor> {
         if (!didPop) leave();
       },
       child: Scaffold(
+        backgroundColor: colors.background,
         appBar: AppBar(
+          leadingWidth: 76,
+          leading: TextButton(
+            key: const ValueKey('cancel-rule'),
+            onPressed: () => Navigator.maybePop(context),
+            child: const Text('取消'),
+          ),
           title: Text(widget.editing ? '编辑规则' : '新建规则'),
           actions: [
             Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: FilledButton(
+              padding: const EdgeInsets.only(right: 6),
+              child: TextButton(
                 key: const ValueKey('save-rule'),
                 onPressed: busy ? null : save,
-                style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
                 child: busy
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('保存'),
+                    : const Text(
+                        '保存',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
               ),
             ),
           ],
-          bottom: error == null
-              ? null
-              : PreferredSize(
-                  preferredSize: const Size.fromHeight(56),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    child: Callout(
-                      error!,
-                      icon: Icons.error_outline,
-                      color: theme.colorScheme.error,
-                    ),
-                  ),
-                ),
         ),
         body: Form(
           key: form,
-          child: ListView(
-            padding: pagePadding(context, top: 0),
-            children: [
-              for (final c in children) Readable(maxWidth: 680, child: c),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final side = math.max(gutter, (constraints.maxWidth - 680) / 2);
+              // Every field stays built so validation covers off-screen rows.
+              return SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  side,
+                  8,
+                  side,
+                  MediaQuery.paddingOf(context).bottom + 40,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: children,
+                ),
+              );
+            },
           ),
         ),
       ),

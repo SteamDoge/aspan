@@ -9,12 +9,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'data.dart';
 import 'design.dart';
-import 'details.dart';
-import 'editor.dart';
 import 'entries.dart';
 import 'navigation.dart';
 import 'profile.dart';
-import 'widgets.dart';
 
 class ASpanApp extends StatefulWidget {
   final SpanStore store;
@@ -97,9 +94,11 @@ class _ASpanAppState extends State<ASpanApp> with WidgetsBindingObserver {
   );
 }
 
-/// Top-level frame. One Scaffold owns the system insets: it extends the body
-/// under the floating dock and reports the dock height as bottom padding, so
-/// every page scrolls beneath the translucent dock and stops above it.
+/// Top-level frame shared with AQ: a floating liquid-glass dock on narrow
+/// screens and a rail from 840dp. One Scaffold owns the system insets: it
+/// extends the body under the dock and reports the dock height as bottom
+/// padding, so every tab scrolls beneath the translucent dock and stops
+/// above it. Folders, details and settings sub-pages push above the dock.
 class SpanShell extends StatefulWidget {
   final SpanStore store;
   const SpanShell({super.key, required this.store});
@@ -109,16 +108,16 @@ class SpanShell extends StatefulWidget {
 
 class _SpanShellState extends State<SpanShell> {
   int index = 0;
-  bool projectMode = false;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.store,
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
+        final store = widget.store;
         final rail = constraints.maxWidth >= 840;
         final theme = Theme.of(context);
+        final colors = SpanColors.of(context);
         final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
-        final error = widget.store.lastRefreshError;
         final systemBottom = MediaQuery.paddingOf(context).bottom;
         final gestures = MediaQuery.systemGestureInsetsOf(context);
         final buttonScrim =
@@ -135,6 +134,28 @@ class _SpanShellState extends State<SpanShell> {
             : system == Brightness.dark
             ? const Color(0xCC000000)
             : const Color(0xE6FFFFFF);
+        Widget tabs = IndexedStack(
+          index: index,
+          children: [
+            FolderView(store: store, folder: Folder.home),
+            ProjectsPage(store: store),
+            SettingsPage(store: store),
+          ],
+        );
+        if (store.lastRefreshError != null) {
+          tabs = Column(
+            children: [
+              RefreshBanner(store: store),
+              Expanded(
+                child: MediaQuery.removePadding(
+                  context: context,
+                  removeTop: true,
+                  child: tabs,
+                ),
+              ),
+            ],
+          );
+        }
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: spanOverlayStyle(theme.brightness == Brightness.dark).copyWith(
             systemNavigationBarIconBrightness: buttonScrim
@@ -144,51 +165,27 @@ class _SpanShellState extends State<SpanShell> {
                 : null,
           ),
           child: Scaffold(
-            backgroundColor: SpanColors.of(context).background,
+            backgroundColor: colors.background,
             extendBody: true,
             body: Stack(
               children: [
-                SafeArea(
-                  bottom: rail,
-                  child: Row(
-                    children: [
-                      // Preserve the content's element address across the breakpoint.
-                      if (rail)
-                        SpanNavigation(
+                Row(
+                  children: [
+                    // Preserve the content's element address across the
+                    // breakpoint.
+                    if (rail)
+                      SafeArea(
+                        right: false,
+                        child: SpanNavigation(
                           rail: true,
                           selected: index,
                           onSelected: select,
-                        )
-                      else
-                        const SizedBox.shrink(),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            if (error != null)
-                              RefreshBanner(store: widget.store),
-                            Expanded(
-                              child: IndexedStack(
-                                index: index,
-                                children: [
-                                  Home(store: widget.store),
-                                  EntryBrowser(
-                                    store: widget.store,
-                                    embedded: true,
-                                    onModeChanged: (active) {
-                                      if (active != projectMode) {
-                                        setState(() => projectMode = active);
-                                      }
-                                    },
-                                  ),
-                                  Profile(store: widget.store),
-                                ],
-                              ),
-                            ),
-                          ],
                         ),
-                      ),
-                    ],
-                  ),
+                      )
+                    else
+                      const SizedBox.shrink(),
+                    Expanded(child: tabs),
+                  ],
                 ),
                 if (buttonScrim)
                   Positioned(
@@ -201,15 +198,6 @@ class _SpanShellState extends State<SpanShell> {
                   ),
               ],
             ),
-            floatingActionButton:
-                index == 2 || (index == 1 && projectMode) || keyboard
-                ? null
-                : FloatingActionButton.extended(
-                    key: const ValueKey('create-rule'),
-                    onPressed: () => openCreator(context, widget.store),
-                    icon: const Icon(Icons.add),
-                    label: const Text('新建规则'),
-                  ),
             bottomNavigationBar: rail || keyboard
                 ? null
                 : SpanNavigation(selected: index, onSelected: select),
@@ -232,257 +220,34 @@ class RefreshBanner extends StatelessWidget {
       liveRegion: true,
       child: Material(
         color: scheme.errorContainer,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
-          child: Row(
-            children: [
-              Icon(
-                Icons.sync_problem,
-                size: 20,
-                color: scheme.onErrorContainer,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '数据未刷新：${errorMessage(store.lastRefreshError!)}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: scheme.onErrorContainer),
-                ),
-              ),
-              TextButton(
-                onPressed: () => perform(context, store.refresh),
-                child: const Text('重试'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Large in-page title shared by the three destinations.
-class PageTitle extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  final List<Widget> actions;
-  const PageTitle(
-    this.title, {
-    super.key,
-    this.subtitle,
-    this.actions = const [],
-  });
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 12, 0, 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+            child: Row(
               children: [
-                Semantics(
-                  header: true,
-                  child: Text(title, style: theme.textTheme.headlineMedium),
+                Icon(
+                  Icons.sync_problem,
+                  size: 20,
+                  color: scheme.onErrorContainer,
                 ),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 2),
-                  Text(subtitle!, style: theme.textTheme.bodySmall),
-                ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '数据未刷新：${errorMessage(store.lastRefreshError!)}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: scheme.onErrorContainer),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => perform(context, store.refresh),
+                  child: const Text('重试'),
+                ),
               ],
             ),
           ),
-          ...actions,
-        ],
-      ),
-    );
-  }
-}
-
-/// Home answers "what needs me now?" and lets the user close a period
-/// without leaving the page.
-class Home extends StatelessWidget {
-  final SpanStore store;
-  const Home({super.key, required this.store});
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final rules = store.rules;
-    String phase(Json r) => store.view(r['id'] as String)['phase'] as String;
-    String planned(Json r) =>
-        store.view(r['id'] as String)['planned'] as String? ?? '9999';
-    int byDate(Json a, Json b) => planned(a).compareTo(planned(b));
-    final attention =
-        rules.where((r) => actionPhases.contains(phase(r))).toList()
-          ..sort((a, b) {
-            final p = actionPhases
-                .indexOf(phase(a))
-                .compareTo(actionPhases.indexOf(phase(b)));
-            return p == 0 ? byDate(a, b) : p;
-          });
-    final upcoming = rules.where((r) => phase(r) == 'reminder').toList()
-      ..sort(byDate);
-    final shown = {...attention, ...upcoming}.map((r) => r['id']).toSet();
-    final pinned =
-        rules
-            .where((r) => r['pinned'] == true && !shown.contains(r['id']))
-            .toList()
-          ..sort(byDate);
-    shown.addAll(pinned.map((r) => r['id']));
-    final later =
-        rules
-            .where(
-              (r) =>
-                  !shown.contains(r['id']) &&
-                  store.view(r['id'] as String)['planned'] != null,
-            )
-            .toList()
-          ..sort(byDate);
-    final low = store.accounts
-        .where(
-          (a) =>
-              a['archived'] != true &&
-              store.accountView(a['id'] as String)['active'] == true &&
-              store.accountView(a['id'] as String)['low'] == true,
-        )
-        .toList();
-
-    Widget row(Json r, {bool quick = false}) => RuleTile(
-      key: ValueKey('home-${r['id']}'),
-      store: store,
-      rule: r,
-      onTap: () => openRule(context, store, r['id'] as String),
-      trailing: quick && store.view(r['id'] as String)['planned'] != null
-          ? IconButton(
-              tooltip: '完成本期',
-              onPressed: () => eventSheet(context, store, r, 'completed'),
-              icon: const Icon(Icons.check_circle_outline),
-            )
-          : null,
-    );
-
-    final summary = [
-      '共 ${rules.length} 条规则',
-      if (upcoming.isNotEmpty) '${upcoming.length} 项即将到来',
-      if (low.isNotEmpty) '${low.length} 个资源不足',
-    ].join('  ·  ');
-    final children = <Widget>[
-      Padding(
-        key: const ValueKey('page-home'),
-        padding: const EdgeInsets.fromLTRB(4, 8, 0, 0),
-        child: Row(
-          children: [
-            Icon(Icons.all_inclusive, color: theme.colorScheme.primary),
-            const SizedBox(width: 8),
-            Text(
-              'ASpan',
-              style: theme.textTheme.titleMedium?.copyWith(fontSize: 16),
-            ),
-            const Spacer(),
-            IconButton(
-              tooltip: '刷新本地数据',
-              onPressed: () => perform(context, store.refresh),
-              icon: const Icon(Icons.refresh),
-            ),
-          ],
         ),
-      ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              friendlyDate(store.snapshot['today'] as String?),
-              style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
-            ),
-            const SizedBox(height: 4),
-            Semantics(
-              header: true,
-              child: Text(
-                rules.isEmpty
-                    ? '欢迎使用 ASpan'
-                    : attention.isEmpty
-                    ? '暂无需要处理的事项'
-                    : '${attention.length} 项需要处理',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: attention.isEmpty ? null : warningColor(context),
-                ),
-              ),
-            ),
-            if (rules.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(summary, style: theme.textTheme.bodySmall),
-            ],
-          ],
-        ),
-      ),
-      if (rules.isEmpty)
-        EmptyState(
-          '从一件小事开始',
-          '订阅、保活、次卡、证件有效期……\n每条规则只开启你需要的时间、资源与提醒。',
-          icon: Icons.all_inclusive,
-          action: FilledButton.icon(
-            onPressed: () => openCreator(context, store),
-            icon: const Icon(Icons.add),
-            label: const Text('新建第一条规则'),
-          ),
-        ),
-      if (attention.isNotEmpty) ...[
-        const SectionHeader('需要处理', note: '逾期 → 今天 → 处理窗口'),
-        for (final r in attention.take(50)) row(r, quick: true),
-      ],
-      if (low.isNotEmpty) ...[
-        const SectionHeader('资源不足'),
-        Panel(
-          children: [
-            for (final a in low)
-              ListTile(
-                leading: IconTile(
-                  Icons.account_balance_wallet_outlined,
-                  color: warningColor(context),
-                  size: 32,
-                ),
-                title: Text(a['name'] as String),
-                subtitle: Text(
-                  '剩余 ${store.accountView(a['id'] as String)['formatted']} ${a['unit']['code']}',
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => openAccount(context, store, a['id'] as String),
-              ),
-          ],
-        ),
-      ],
-      if (upcoming.isNotEmpty) ...[
-        const SectionHeader('提前提醒', note: '已进入提醒阶段'),
-        for (final r in upcoming.take(30)) row(r, quick: true),
-      ],
-      if (pinned.isNotEmpty) ...[
-        const SectionHeader('置顶'),
-        for (final r in pinned) row(r),
-      ],
-      if (later.isNotEmpty) ...[
-        SectionHeader(
-          '接下来',
-          trailing: TextButton(
-            onPressed: () => openOverview(context, store),
-            child: Text('全部 ${rules.length} 条'),
-          ),
-        ),
-        for (final r in later.take(6)) row(r),
-      ],
-    ];
-    return RefreshIndicator(
-      onRefresh: () => perform(context, store.refresh),
-      child: ListView(
-        padding: pagePadding(context, fab: true),
-        children: [
-          for (final c in children) Readable(maxWidth: 1000, child: c),
-        ],
       ),
     );
   }

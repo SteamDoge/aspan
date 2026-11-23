@@ -1,68 +1,36 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 ASpan contributors.
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'data.dart';
 import 'design.dart';
 
-/// Shared frame for list strips: one surface, one radius, one selection style.
-class StripFrame extends StatelessWidget {
-  final Widget child;
-  final VoidCallback? onTap, onLongPress;
-  final bool selected, dimmed;
-  const StripFrame({
-    super.key,
-    required this.child,
-    this.onTap,
-    this.onLongPress,
-    this.selected = false,
-    this.dimmed = false,
-  });
-  @override
-  Widget build(BuildContext context) {
-    final colors = SpanColors.of(context);
-    final primary = Theme.of(context).colorScheme.primary;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 150),
-        opacity: dimmed ? .45 : 1,
-        child: Material(
-          color: selected ? colors.soft : colors.panel,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: BorderSide(
-              color: selected ? primary : colors.line,
-              width: selected ? 1.5 : 1,
-            ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(onTap: onTap, onLongPress: onLongPress, child: child),
-        ),
-      ),
-    );
-  }
-}
-
-/// Compact horizontal strip: icon · name · next date · status · one bar.
-class RuleTile extends StatelessWidget {
+/// One rule in a list: name, one line of status, and a compact progress ring.
+class RuleRow extends StatelessWidget {
   final SpanStore store;
   final Json rule;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
-  final Widget? trailing;
-  final bool selected, dimmed, dense;
-  const RuleTile({
+  final void Function(Offset position)? onMenu;
+  final Widget? leading, trailing;
+  final bool first, last, selected;
+
+  /// Extra left inset for members shown under a merged entry.
+  final double indent;
+  const RuleRow({
     super.key,
     required this.store,
     required this.rule,
     required this.onTap,
-    this.onLongPress,
+    this.onMenu,
+    this.leading,
     this.trailing,
+    this.first = false,
+    this.last = false,
     this.selected = false,
-    this.dimmed = false,
-    this.dense = false,
+    this.indent = 0,
   });
   @override
   Widget build(BuildContext context) {
@@ -71,41 +39,51 @@ class RuleTile extends StatelessWidget {
     final v = store.view(rule['id'] as String), phase = v['phase'] as String;
     final days = v['remaining_days'] as int?;
     final account = v['account'] as Map?;
-    final urgent = actionPhases.contains(phase);
-    final accent = urgent || phase == 'reminder'
+    final flagged = actionPhases.contains(phase) || phase == 'reminder';
+    final accent = flagged
         ? phaseColor(context, phase)
         : theme.colorScheme.primary;
-    final firstTag = (rule['tags'] as List).isEmpty
+    final tags = rule['tags'] as List;
+    final firstTag = tags.isEmpty
         ? null
-        : store.state['tags'][(rule['tags'] as List).first]?['name'];
+        : store.state['tags'][tags.first]?['name'];
     final balance = account == null
         ? null
         : '${account['formatted']} ${account['unit']}';
     final ended = rule['schedule'] != null && v['planned'] == null;
+    final status = days != null
+        ? phase == 'grace' || phase == 'processing'
+              ? '${phaseLabels[phase]} · ${relativeDays(days)}'
+              : relativeDays(days)
+        : balance ?? (ended ? '周期已结束' : null);
     final meta = [
-      if (v['planned'] != null) friendlyDate(v['planned'] as String),
-      if (ended) '周期已结束',
+      if (v['planned'] != null)
+        friendlyDate(v['planned'] as String, weekday: false),
       if (balance != null && days != null) balance,
       if (firstTag != null) '#$firstTag',
-    ].join('  ·  ');
+    ].join(' · ');
     final progress = (v['time_progress'] ?? account?['progress']) as num?;
-    final status = days != null ? relativeDays(days) : balance;
-    final showPhase = const ['reminder', 'grace', 'processing'].contains(phase);
-    return MergeSemantics(
-      child: Semantics(
+    final leadSpace = 16.0 + indent;
+    return Semantics(
+      selected: selected,
+      child: GroupedTile(
+        first: first,
+        last: last,
         selected: selected,
-        child: StripFrame(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          selected: selected,
-          dimmed: dimmed,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(12, dense ? 8 : 11, 8, dense ? 8 : 11),
-            child: Row(
-              children: [
-                IconTile(ruleIcon(rule['icon'] as String?), color: accent),
-                const SizedBox(width: 12),
-                Expanded(
+        onTap: onTap,
+        onMenu: onMenu,
+        indent: leadSpace,
+        child: Row(
+          children: [
+            if (leading != null) ...[
+              SizedBox(width: math.max(0, leadSpace - 12)),
+              leading!,
+            ] else
+              SizedBox(width: leadSpace),
+            Expanded(
+              child: MergeSemantics(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
@@ -116,94 +94,125 @@ class RuleTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium,
                       ),
-                      if (meta.isNotEmpty) ...[
+                      if (status != null || meta.isNotEmpty) ...[
                         const SizedBox(height: 2),
-                        Text(
-                          meta,
+                        Text.rich(
+                          TextSpan(
+                            children: [
+                              if (status != null)
+                                TextSpan(
+                                  text: status,
+                                  style: TextStyle(
+                                    color: flagged ? accent : null,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              if (status != null && meta.isNotEmpty)
+                                const TextSpan(text: '   '),
+                              if (meta.isNotEmpty)
+                                TextSpan(
+                                  text: meta,
+                                  style: TextStyle(color: colors.muted),
+                                ),
+                            ],
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 14,
+                            fontFeatures: tabular,
+                          ),
                         ),
                       ],
-                      if (progress != null && !dense) ...[
+                      // Dated rules show the phased timeline; balance-only
+                      // rules show how much of the reference remains.
+                      if (v['time_progress'] != null) ...[
                         const SizedBox(height: 8),
-                        Semantics(
-                          label: v['time_progress'] != null ? '时间进度' : '资源剩余比例',
-                          value: '${(progress * 100).round()}%',
-                          child: LinearProgressIndicator(
-                            value: progress.toDouble(),
-                            minHeight: 3,
-                            color: accent,
-                            backgroundColor: colors.soft,
-                          ),
+                        TimelineBar(
+                          compact: true,
+                          segments: v['segments'] == null
+                              ? null
+                              : object(v['segments']),
+                          progress: (v['time_progress'] as num).toDouble(),
+                          remainingDays: days,
+                          graceDays:
+                              rule['reminder']?['grace_days'] as int? ?? 0,
+                          color: accent,
+                        ),
+                      ] else if (progress != null) ...[
+                        const SizedBox(height: 8),
+                        ProgressBar(
+                          value: progress.toDouble(),
+                          color: accent,
+                          label: '资源剩余比例',
                         ),
                       ],
                     ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                if (status != null)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        status,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 14,
-                          color: urgent ? accent : null,
-                          fontFeatures: tabular,
-                        ),
-                      ),
-                      if (showPhase) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          phaseLabels[phase]!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: accent,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                if (trailing != null) trailing! else const SizedBox(width: 4),
-              ],
+              ),
             ),
-          ),
+            trailing ?? const SizedBox(width: 16),
+          ],
         ),
       ),
     );
   }
 }
 
-/// A merged entry: summary strip plus optional inline members.
-class GroupTile extends StatelessWidget {
+/// Compact pill that completes the current period from a list row.
+class CompleteButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  const CompleteButton({super.key, required this.onPressed});
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
+    child: Tooltip(
+      message: '完成本期',
+      child: TextButton(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          backgroundColor: SpanColors.of(context).fill,
+          minimumSize: const Size(56, 34),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          shape: const StadiumBorder(),
+          textStyle: Theme.of(context).textTheme.labelLarge
+              ?.copyWith(fontSize: 14),
+        ),
+        child: const Text('完成'),
+      ),
+    ),
+  );
+}
+
+/// A merged entry: a summary row whose members can unfold beneath it.
+class GroupRow extends StatelessWidget {
   final SpanStore store;
   final Json group;
   final List<Json> members;
-  final bool expanded;
+  final bool expanded, first, last, dimmed;
   final VoidCallback onTap;
   final VoidCallback? onToggle;
-  final Widget Function(Json member) memberBuilder;
-  final bool dimmed;
+  final void Function(Offset position)? onMenu;
   final Widget? trailing;
-  const GroupTile({
+  const GroupRow({
     super.key,
     required this.store,
     required this.group,
     required this.members,
     required this.expanded,
     required this.onTap,
-    required this.memberBuilder,
     this.onToggle,
-    this.dimmed = false,
+    this.onMenu,
     this.trailing,
+    this.first = false,
+    this.last = false,
+    this.dimmed = false,
   });
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = SpanColors.of(context);
     final shared = [
       for (final aid in group['accounts'] as List)
         '${store.accountView(aid as String)['formatted']} ${store.accountView(aid)['unit']}',
@@ -214,103 +223,129 @@ class GroupTile extends StatelessWidget {
         .length;
     final meta = [
       '${members.length} 条规则',
-      if (shared.isNotEmpty) '共享 ${shared.join(' / ')}',
-      if (urgent > 0) '$urgent 条需处理',
-    ].join('  ·  ');
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        MergeSemantics(
-          child: StripFrame(
-            onTap: onTap,
-            dimmed: dimmed,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 11, 4, 11),
-              child: Row(
-                children: [
-                  IconTile(
-                    Icons.layers_outlined,
-                    color: urgent > 0
-                        ? warningColor(context)
-                        : theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          group['name'] as String,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          meta,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (onToggle != null)
-                    IconButton(
-                      key: ValueKey('toggle-${group['id']}'),
-                      tooltip: expanded ? '收起成员' : '展开成员',
-                      onPressed: onToggle,
-                      icon: AnimatedRotation(
-                        turns: expanded ? .5 : 0,
-                        duration: const Duration(milliseconds: 180),
-                        child: const Icon(Icons.expand_more),
+      if (shared.isNotEmpty) shared.join(' / '),
+    ].join(' · ');
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 150),
+      opacity: dimmed ? .4 : 1,
+      child: GroupedTile(
+        first: first,
+        last: last && !expanded,
+        onTap: onTap,
+        onMenu: onMenu,
+        indent: 52,
+        child: Row(
+          children: [
+            const SizedBox(width: 14),
+            Icon(
+              Icons.layers_outlined,
+              size: 24,
+              color: urgent > 0
+                  ? warningColor(context)
+                  : theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: MergeSemantics(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        group['name'] as String,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium,
                       ),
-                    ),
-                  ?trailing,
-                ],
+                      const SizedBox(height: 2),
+                      Text.rich(
+                        TextSpan(
+                          children: [
+                            if (urgent > 0)
+                              TextSpan(
+                                text: '$urgent 条需处理   ',
+                                style: TextStyle(
+                                  color: warningColor(context),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            TextSpan(text: meta),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 14,
+                          color: colors.muted,
+                          fontFeatures: tabular,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
+            if (trailing != null)
+              trailing!
+            else if (onToggle != null)
+              IconButton(
+                key: ValueKey('toggle-${group['id']}'),
+                tooltip: expanded ? '收起成员' : '展开成员',
+                onPressed: onToggle,
+                icon: AnimatedRotation(
+                  turns: expanded ? .25 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: Icon(Icons.chevron_right, color: colors.muted),
+                ),
+              )
+            else
+              const SizedBox(width: 12),
+          ],
         ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
-          child: expanded
-              ? Padding(
-                  padding: const EdgeInsets.only(left: 20),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border(
-                        left: BorderSide(
-                          color: SpanColors.of(context).line,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: Column(
-                        children: [for (final m in members) memberBuilder(m)],
-                      ),
-                    ),
-                  ),
-                )
-              : const SizedBox(width: double.infinity),
-        ),
-      ],
+      ),
     );
   }
 }
 
+/// Thin rounded progress bar used in list rows.
+class ProgressBar extends StatelessWidget {
+  final double value;
+  final Color color;
+  final String label;
+  const ProgressBar({
+    super.key,
+    required this.value,
+    required this.color,
+    required this.label,
+  });
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: label,
+    value: '${(value * 100).round()}%',
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(2),
+      child: LinearProgressIndicator(
+        value: value.clamp(0.0, 1.0),
+        minHeight: 4,
+        color: color,
+        backgroundColor: SpanColors.of(context).fill,
+      ),
+    ),
+  );
+}
+
 /// Phase timeline: real-proportion segments (normal → reminder → event →
-/// processing window) with a marker for today. Values come from Rust.
+/// processing window), separated by small gaps and filled up to today.
+/// Values come from Rust. The compact form is used in list rows; the full
+/// form adds a marker for today.
 class TimelineBar extends StatelessWidget {
   final Json? segments;
   final double progress;
   final int? remainingDays;
   final int graceDays;
   final Color color;
+  final bool compact;
   const TimelineBar({
     super.key,
     required this.segments,
@@ -318,6 +353,7 @@ class TimelineBar extends StatelessWidget {
     required this.remainingDays,
     required this.graceDays,
     required this.color,
+    this.compact = false,
   });
   @override
   Widget build(BuildContext context) {
@@ -336,7 +372,7 @@ class TimelineBar extends StatelessWidget {
       label: '时间进度',
       value: '${(progress * 100).round()}%',
       child: SizedBox(
-        height: 16,
+        height: compact ? 5 : 14,
         width: double.infinity,
         child: CustomPaint(
           painter: _TimelinePainter(
@@ -344,12 +380,11 @@ class TimelineBar extends StatelessWidget {
             reminder: r,
             grace: g,
             position: position.clamp(0.0, 1.0),
-            event: event,
             fill: color,
-            track: colors.soft,
+            track: colors.fill,
             reminderTint: Theme.of(context).colorScheme.primary,
             graceTint: warningColor(context),
-            marker: colors.panel,
+            marker: compact ? null : colors.panel,
           ),
         ),
       ),
@@ -358,14 +393,14 @@ class TimelineBar extends StatelessWidget {
 }
 
 class _TimelinePainter extends CustomPainter {
-  final double normal, reminder, grace, position, event;
-  final Color fill, track, reminderTint, graceTint, marker;
+  final double normal, reminder, grace, position;
+  final Color fill, track, reminderTint, graceTint;
+  final Color? marker;
   _TimelinePainter({
     required this.normal,
     required this.reminder,
     required this.grace,
     required this.position,
-    required this.event,
     required this.fill,
     required this.track,
     required this.reminderTint,
@@ -374,42 +409,57 @@ class _TimelinePainter extends CustomPainter {
   });
   @override
   void paint(Canvas canvas, Size size) {
-    const h = 6.0;
+    final h = marker == null ? size.height : 6.0;
     final top = (size.height - h) / 2;
-    final bar = RRect.fromLTRBR(
-      0,
-      top,
-      size.width,
-      top + h,
-      const Radius.circular(3),
-    );
-    canvas.save();
-    canvas.clipRRect(bar);
-    var x = 0.0;
-    for (final (fraction, color) in [
+    final radius = Radius.circular(h / 2);
+    const gap = 3.0;
+    final parts = [
       (normal, track),
-      (reminder, reminderTint.withValues(alpha: .28)),
-      (grace, graceTint.withValues(alpha: .32)),
-    ]) {
-      final w = fraction * size.width;
-      canvas.drawRect(Rect.fromLTWH(x, top, w, h), Paint()..color = color);
-      x += w;
+      (reminder, reminderTint.withValues(alpha: .25)),
+      (grace, graceTint.withValues(alpha: .3)),
+    ].where((p) => p.$1 > 0).toList();
+    final usable = size.width - gap * (parts.length - 1);
+    final reached = position * usable;
+    var x = 0.0, done = 0.0;
+    for (final (fraction, tint) in parts) {
+      final w = fraction * usable;
+      final piece = RRect.fromLTRBR(x, top, x + w, top + h, radius);
+      canvas.drawRRect(piece, Paint()..color = tint);
+      final filled = (reached - done).clamp(0.0, w);
+      if (filled > 0) {
+        canvas.save();
+        canvas.clipRRect(piece);
+        canvas.drawRect(
+          Rect.fromLTWH(x, top, filled, h),
+          Paint()..color = fill,
+        );
+        canvas.restore();
+      }
+      x += w + gap;
+      done += w;
     }
-    canvas.drawRect(
-      Rect.fromLTWH(0, top, position * size.width, h),
-      Paint()..color = fill,
-    );
-    canvas.restore();
-    if (grace > 0 && event < 1) {
-      final ex = event * size.width;
-      canvas.drawRect(
-        Rect.fromLTWH(ex - 1, top - 3, 2, h + 6),
-        Paint()..color = graceTint,
+    if (marker != null) {
+      // Map the position back onto the gapped bar.
+      var cx = reached, acc = 0.0;
+      for (var i = 0; i < parts.length; i++) {
+        acc += parts[i].$1 * usable;
+        if (reached <= acc || i == parts.length - 1) {
+          cx = reached + gap * i;
+          break;
+        }
+      }
+      cx = cx.clamp(7.0, size.width - 7);
+      canvas.drawCircle(
+        Offset(cx, size.height / 2),
+        7,
+        Paint()..color = marker!,
+      );
+      canvas.drawCircle(
+        Offset(cx, size.height / 2),
+        4.5,
+        Paint()..color = fill,
       );
     }
-    final cx = (position * size.width).clamp(6.0, size.width - 6);
-    canvas.drawCircle(Offset(cx, size.height / 2), 6, Paint()..color = marker);
-    canvas.drawCircle(Offset(cx, size.height / 2), 4, Paint()..color = fill);
   }
 
   @override
@@ -419,61 +469,6 @@ class _TimelinePainter extends CustomPainter {
       old.reminder != reminder ||
       old.grace != grace ||
       old.fill != fill ||
-      old.track != track;
-}
-
-/// Bounds constructed rows while keeping every retained record accessible.
-class PagedItems extends StatefulWidget {
-  final List<Json> items;
-  final Widget Function(Json) itemBuilder;
-  const PagedItems({super.key, required this.items, required this.itemBuilder});
-  @override
-  State<PagedItems> createState() => _PagedItemsState();
-}
-
-class _PagedItemsState extends State<PagedItems> {
-  int page = 0;
-  static const pageSize = 50;
-  @override
-  Widget build(BuildContext context) {
-    final pages = (widget.items.length / pageSize).ceil().clamp(1, 1 << 31);
-    final current = page.clamp(0, pages - 1);
-    final rows = [
-      for (final item in widget.items.skip(current * pageSize).take(pageSize))
-        widget.itemBuilder(item),
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Panel(children: rows),
-        if (pages > 1)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: '上一页',
-                  onPressed: current == 0
-                      ? null
-                      : () => setState(() => page = current - 1),
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                Text(
-                  '${current + 1} / $pages 页 · 共 ${widget.items.length} 条',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                IconButton(
-                  tooltip: '下一页',
-                  onPressed: current + 1 >= pages
-                      ? null
-                      : () => setState(() => page = current + 1),
-                  icon: const Icon(Icons.chevron_right),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
+      old.track != track ||
+      old.marker != marker;
 }

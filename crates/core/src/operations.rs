@@ -243,6 +243,10 @@ impl State {
                         tags.retain(|v| v.as_str() != Some(tid));
                     }
                 }
+                // A home page limited to this tag falls back to the default.
+                if self.settings.get("home").map(String::as_str) == Some(&format!("tag:{tid}")) {
+                    self.settings.remove("home");
+                }
                 Ok(Value::Null)
             }
             "save_template" => {
@@ -265,7 +269,7 @@ impl State {
             }
             "setting" => {
                 let key = text(&a, "key")?;
-                if !["theme", "palette", "sort", "descending"].contains(&key) {
+                if !["theme", "palette", "sort", "descending", "home"].contains(&key) {
                     return Err("设置项不存在".into());
                 }
                 let value = text(&a, "value")?;
@@ -274,6 +278,14 @@ impl State {
                     "palette" => ["lucent", "folio", "edition", "nocturne"].contains(&value),
                     "sort" => ["manual", "reminder", "event", "remaining"].contains(&value),
                     "descending" => ["true", "false"].contains(&value),
+                    // Home page: every rule by due date, grouped by folder or
+                    // tag, or only one existing folder or tag.
+                    "home" => match value.split_once(':') {
+                        None => ["due", "project", "tag"].contains(&value),
+                        Some(("project", pid)) => self.projects.contains_key(pid),
+                        Some(("tag", tid)) => self.tags.contains_key(tid),
+                        Some(_) => false,
+                    },
                     _ => false,
                 };
                 if !valid {

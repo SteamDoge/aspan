@@ -8,7 +8,6 @@ import 'package:aspan/data.dart';
 import 'package:aspan/details.dart';
 import 'package:aspan/editor.dart';
 import 'package:aspan/entries.dart';
-import 'package:aspan/widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -265,28 +264,35 @@ void main() {
   });
 
   testWidgets(
-    'large histories construct one bounded page and retain access to later records',
+    'large histories build only visible rows and still reach the last record',
     (tester) async {
       final items = List.generate(5000, (i) => <String, dynamic>{'id': '$i'});
+      var built = 0;
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(
-            body: SingleChildScrollView(
-              child: PagedItems(
-                items: items,
-                itemBuilder: (item) => Text('记录 ${item['id']}'),
-              ),
-            ),
+          home: RecordsPage(
+            title: '操作历史',
+            store: store,
+            items: () => items,
+            row: (context, item) {
+              built++;
+              return SizedBox(height: 48, child: Text('记录 ${item['id']}'));
+            },
           ),
         ),
       );
-      expect(find.text('记录 49'), findsOneWidget);
-      expect(find.text('记录 50'), findsNothing);
-      await tester.ensureVisible(find.byTooltip('下一页'));
-      await tester.tap(find.byTooltip('下一页'));
-      await tester.pumpAndSettle();
-      expect(find.text('记录 50'), findsOneWidget);
+      expect(find.text('记录 0'), findsOneWidget);
+      expect(find.text('记录 4999'), findsNothing);
+      expect(built, lessThan(100));
+      await tester.scrollUntilVisible(
+        find.text('记录 4999'),
+        20000,
+        scrollable: find.byType(Scrollable).first,
+        maxScrolls: 50,
+      );
+      expect(find.text('记录 4999'), findsOneWidget);
       expect(find.text('记录 0'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
     },
   );
 }

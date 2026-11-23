@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 ASpan contributors.
 
+import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,26 +13,10 @@ import 'palette.dart';
 export 'palette.dart';
 
 // ---------------------------------------------------------------------------
-// Spacing: one 4-based scale. Page gutter 16, section gap 24, row gap 8.
+// Spacing: page gutter 16, grouped cards with radius 12, 16pt row insets.
 // ---------------------------------------------------------------------------
 const gutter = 16.0;
-
-/// Clearance below the last row when a floating action button is shown.
-const fabClearance = 88.0;
-
-/// List padding that consumes the real bottom inset (system bar or the
-/// floating navigation reported by the shell Scaffold) instead of hiding it.
-EdgeInsets pagePadding(
-  BuildContext context, {
-  double top = 8,
-  bool fab = false,
-  double horizontal = gutter,
-}) => EdgeInsets.fromLTRB(
-  horizontal,
-  top,
-  horizontal,
-  MediaQuery.paddingOf(context).bottom + (fab ? fabClearance : 32),
-);
+const tabular = [FontFeature.tabularFigures()];
 
 String errorMessage(Object error) {
   if (error is AspanError) return error.message;
@@ -54,12 +41,12 @@ const phaseLabels = {
 
 Color warningColor(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-    ? const Color(0xFFFFCF87)
-    : const Color(0xFF835000);
+    ? const Color(0xFFFFB340)
+    : const Color(0xFFB05000);
 Color successColor(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-    ? const Color(0xFF8FD9A8)
-    : const Color(0xFF1E6B3F);
+    ? const Color(0xFF5FD47A)
+    : const Color(0xFF1E7B34);
 
 Color phaseColor(BuildContext context, String phase) => switch (phase) {
   'overdue' => Theme.of(context).colorScheme.error,
@@ -110,11 +97,11 @@ String cycleLabel(Json? cycle) => switch (cycle?['kind']) {
   'once' => '单次',
   'daily' => '每日',
   'weekly' => '每周',
-  'monthly' => '每自然月',
-  'yearly' => '每自然年',
+  'monthly' => '每月',
+  'yearly' => '每年',
   'interval' => '每 ${cycle!['days']} 天',
-  'restart' => '完成后每 ${cycle!['days']} 天重新计时',
-  'calendar' => '指定日期 ${(cycle!['dates'] as List?)?.length ?? 0} 个',
+  'restart' => '完成后每 ${cycle!['days']} 天',
+  'calendar' => '指定 ${(cycle!['dates'] as List?)?.length ?? 0} 个日期',
   _ => '${cycle!['kind']}',
 };
 
@@ -161,6 +148,9 @@ Future<void> perform(
   }
 }
 
+Future<T?> push<T>(BuildContext context, Widget page) =>
+    Navigator.push<T>(context, MaterialPageRoute<T>(builder: (_) => page));
+
 Future<String?> askText(
   BuildContext context,
   String title, {
@@ -187,13 +177,13 @@ Future<String?> askText(
           }
 
           return AlertDialog(
-            title: Text(title),
+            title: Text(title, textAlign: TextAlign.center),
             content: TextField(
               autofocus: true,
               controller: controller,
               keyboardType: keyboard,
               decoration: InputDecoration(
-                labelText: label ?? '名称',
+                hintText: label ?? '名称',
                 helperText: helper,
                 errorText: error,
               ),
@@ -207,7 +197,13 @@ Future<String?> askText(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('取消'),
               ),
-              FilledButton(onPressed: submit, child: Text(action)),
+              TextButton(
+                onPressed: submit,
+                child: Text(
+                  action,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
             ],
           );
         },
@@ -251,31 +247,334 @@ Future<bool> confirm(
 }) async =>
     await showDialog<bool>(
       context: context,
-      builder: (context) {
-        final scheme = Theme.of(context).colorScheme;
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
+      builder: (context) => AlertDialog(
+        title: Text(title, textAlign: TextAlign.center),
+        content: Text(message, textAlign: TextAlign.center),
+        actionsAlignment: MainAxisAlignment.spaceEvenly,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            style: destructive
+                ? TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  )
+                : null,
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              action,
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            FilledButton(
-              style: destructive
-                  ? FilledButton.styleFrom(
-                      backgroundColor: scheme.error,
-                      foregroundColor: scheme.onError,
-                    )
-                  : null,
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(action),
-            ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     ) ??
     false;
+
+// ---------------------------------------------------------------------------
+// Page skeleton: a large title that folds into a translucent bar on scroll,
+// grouped content centered on wide screens and an optional bottom toolbar.
+// ---------------------------------------------------------------------------
+class SpanPage extends StatefulWidget {
+  final String title;
+  final Widget? subtitle;
+  final Widget? leading;
+  final double? leadingWidth;
+  final List<Widget> actions;
+  final List<Widget> slivers;
+  final Widget? toolbar;
+
+  /// Usually an [AddButton]; it floats above the toolbar and the page keeps
+  /// room below the last row so the button never covers it.
+  final Widget? floatingActionButton;
+  final double maxWidth;
+  final Key? titleKey;
+  final Future<void> Function()? onRefresh;
+  const SpanPage({
+    super.key,
+    required this.title,
+    required this.slivers,
+    this.subtitle,
+    this.leading,
+    this.leadingWidth,
+    this.actions = const [],
+    this.toolbar,
+    this.floatingActionButton,
+    this.maxWidth = 720,
+    this.titleKey,
+    this.onRefresh,
+  });
+  @override
+  State<SpanPage> createState() => _SpanPageState();
+}
+
+class _SpanPageState extends State<SpanPage> {
+  final scroll = ScrollController();
+  bool collapsed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    scroll.addListener(() {
+      final next = scroll.offset > 34;
+      if (next != collapsed) setState(() => collapsed = next);
+    });
+  }
+
+  @override
+  void dispose() {
+    scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = SpanColors.of(context);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final plain = MediaQuery.highContrastOf(context);
+    return Scaffold(
+      backgroundColor: colors.background,
+      extendBody: true,
+      bottomNavigationBar: keyboard ? null : widget.toolbar,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final inset = math.max(
+            gutter,
+            (constraints.maxWidth - widget.maxWidth) / 2,
+          );
+          Widget view = CustomScrollView(
+            controller: scroll,
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverAppBar(
+                pinned: true,
+                toolbarHeight: 52,
+                leading: widget.leading,
+                leadingWidth: widget.leadingWidth,
+                backgroundColor: Colors.transparent,
+                shape: collapsed
+                    ? Border(bottom: BorderSide(color: colors.line, width: .7))
+                    : null,
+                // The flexible space gets loose constraints; expand so the
+                // fill covers the whole bar instead of collapsing to zero.
+                flexibleSpace: SizedBox.expand(
+                  key: const ValueKey('page-bar-fill'),
+                  child: collapsed && !plain
+                      ? ClipRect(
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                            child: ColoredBox(color: colors.bar),
+                          ),
+                        )
+                      : ColoredBox(color: colors.background),
+                ),
+                title: AnimatedOpacity(
+                  opacity: collapsed ? 1 : 0,
+                  duration: const Duration(milliseconds: 160),
+                  child: Text(
+                    widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                actions: [...widget.actions, const SizedBox(width: 6)],
+              ),
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(inset + 4, 0, inset + 4, 6),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    key: widget.titleKey,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          widget.title,
+                          style: theme.textTheme.headlineLarge,
+                        ),
+                      ),
+                      if (widget.subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        DefaultTextStyle.merge(
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colors.muted,
+                          ),
+                          child: widget.subtitle!,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              for (final sliver in widget.slivers)
+                SliverPadding(
+                  padding: EdgeInsets.symmetric(horizontal: inset),
+                  sliver: sliver,
+                ),
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height:
+                      MediaQuery.paddingOf(context).bottom +
+                      (widget.floatingActionButton == null ? 32 : 88),
+                ),
+              ),
+            ],
+          );
+          if (widget.onRefresh != null) {
+            view = RefreshIndicator(
+              onRefresh: widget.onRefresh!,
+              edgeOffset: MediaQuery.paddingOf(context).top + 52,
+              child: view,
+            );
+          }
+          final fab = widget.floatingActionButton;
+          if (fab == null || keyboard) return view;
+          // The body padding already covers this page's toolbar and, on the
+          // tabs, the shell's dock; a Scaffold FAB would only clear the former.
+          final padding = MediaQuery.paddingOf(context);
+          return Stack(
+            children: [
+              Positioned.fill(child: view),
+              Positioned(
+                right: padding.right + 20,
+                bottom: padding.bottom + 16,
+                child: fab,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Plain box children as one sliver.
+Widget boxes(List<Widget> children) => SliverList.list(children: children);
+
+/// Translucent bottom bar: an optional leading tool, a quiet center caption
+/// (usually the item count) and the primary compose action on the right.
+class SpanToolbar extends StatelessWidget {
+  final Widget? leading, center, trailing;
+  const SpanToolbar({super.key, this.leading, this.center, this.trailing});
+  @override
+  Widget build(BuildContext context) {
+    final colors = SpanColors.of(context);
+    final plain = MediaQuery.highContrastOf(context);
+    final bar = DecoratedBox(
+      decoration: BoxDecoration(
+        color: plain ? colors.background : colors.bar,
+        border: Border(top: BorderSide(color: colors.line, width: .7)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 50,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: leading ?? const SizedBox.shrink(),
+                  ),
+                ),
+                if (center != null)
+                  DefaultTextStyle.merge(
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(fontSize: 12.5),
+                    child: center!,
+                  ),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: trailing ?? const SizedBox.shrink(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    return ClipRect(
+      child: BackdropFilter(
+        enabled: !plain,
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: bar,
+      ),
+    );
+  }
+}
+
+/// The round add button at the bottom right of list pages. AQ uses the same
+/// button with the same icon for adding content.
+class AddButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final String tooltip;
+  const AddButton({super.key, required this.onPressed, this.tooltip = '新建规则'});
+  @override
+  Widget build(BuildContext context) => FloatingActionButton(
+    // Several pages can show one at a time (tabs share a route).
+    heroTag: null,
+    tooltip: tooltip,
+    onPressed: onPressed,
+    child: const Icon(Icons.add, size: 28),
+  );
+}
+
+/// Rounded, filled search field in the style of a system search bar.
+class SearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final ValueChanged<String> onChanged;
+  const SearchField({
+    super.key,
+    required this.controller,
+    required this.onChanged,
+    this.hint = '搜索',
+  });
+  @override
+  Widget build(BuildContext context) {
+    final colors = SpanColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 4),
+      child: ValueListenableBuilder(
+        valueListenable: controller,
+        builder: (context, value, _) => TextField(
+          controller: controller,
+          textInputAction: TextInputAction.search,
+          style: const TextStyle(fontSize: 16),
+          decoration: InputDecoration(
+            hintText: hint,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(vertical: 9),
+            prefixIcon: Icon(Icons.search, size: 20, color: colors.muted),
+            prefixIconConstraints: const BoxConstraints(minWidth: 36),
+            suffixIcon: value.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: '清除搜索',
+                    onPressed: () {
+                      controller.clear();
+                      onChanged('');
+                    },
+                    icon: Icon(Icons.cancel, size: 18, color: colors.muted),
+                  ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
+          ),
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Bottom sheets: one layout for every short task (event, resource, entry…).
@@ -307,24 +606,32 @@ class SheetBody extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
       child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + media.viewPadding.bottom),
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + media.viewPadding.bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(title, style: theme.textTheme.titleLarge),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleLarge,
+            ),
             if (subtitle != null) ...[
               const SizedBox(height: 4),
-              Text(subtitle!, style: theme.textTheme.bodySmall),
+              Text(
+                subtitle!,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall,
+              ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             ...content,
             if (actions.isNotEmpty) ...[
               const SizedBox(height: 20),
               Row(
                 children: [
                   for (var i = 0; i < actions.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 12),
+                    if (i > 0) const SizedBox(width: 10),
                     Expanded(child: actions[i]),
                   ],
                 ],
@@ -357,7 +664,7 @@ class Callout extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
         decoration: BoxDecoration(
-          color: c.withValues(alpha: .08),
+          color: c.withValues(alpha: .1),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -379,36 +686,54 @@ class Callout extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Structure.
+// Grouped lists.
 // ---------------------------------------------------------------------------
+
+/// Section title. Lists use a bold title ("需要处理"); forms and settings use
+/// a quiet caption above the card.
 class SectionHeader extends StatelessWidget {
   final String text;
   final String? note;
   final Widget? trailing;
-  final EdgeInsets padding;
+  final bool large;
   const SectionHeader(
     this.text, {
     super.key,
     this.note,
     this.trailing,
-    this.padding = const EdgeInsets.fromLTRB(4, 24, 4, 8),
+    this.large = true,
   });
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: padding,
+      padding: large
+          ? const EdgeInsets.fromLTRB(4, 22, 0, 8)
+          : const EdgeInsets.fromLTRB(16, 22, 8, 7),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
             child: Semantics(
               header: true,
-              child: Text(
-                note == null ? text : '$text  ·  $note',
+              child: Text.rich(
+                TextSpan(
+                  text: text,
+                  children: [
+                    if (note != null)
+                      TextSpan(
+                        text: '  $note',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                  ],
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall,
+                style: large
+                    ? theme.textTheme.headlineSmall
+                    : theme.textTheme.titleSmall,
               ),
             ),
           ),
@@ -419,8 +744,18 @@ class SectionHeader extends StatelessWidget {
   }
 }
 
-/// A single grouped surface. Rows inside are separated by inset dividers;
-/// panels are never nested.
+/// Quiet explanation below a card.
+class SectionFooter extends StatelessWidget {
+  final String text;
+  const SectionFooter(this.text, {super.key});
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 7, 16, 0),
+    child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+  );
+}
+
+/// A single grouped card. Rows inside are separated by inset hairlines.
 class Panel extends StatelessWidget {
   final List<Widget> children;
   final EdgeInsetsGeometry padding;
@@ -429,11 +764,10 @@ class Panel extends StatelessWidget {
     super.key,
     required this.children,
     this.padding = EdgeInsets.zero,
-    this.dividerIndent = 56,
+    this.dividerIndent = 16,
   });
   @override
   Widget build(BuildContext context) {
-    final colors = SpanColors.of(context);
     final rows = <Widget>[];
     for (var i = 0; i < children.length; i++) {
       if (i > 0 && dividerIndent >= 0) {
@@ -442,11 +776,8 @@ class Panel extends StatelessWidget {
       rows.add(children[i]);
     }
     return Material(
-      color: colors.panel,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: colors.line),
-      ),
+      color: SpanColors.of(context).panel,
+      borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: padding,
@@ -459,23 +790,201 @@ class Panel extends StatelessWidget {
   }
 }
 
-class PhaseBadge extends StatelessWidget {
-  final String phase;
-  const PhaseBadge(this.phase, {super.key});
+/// One row of a grouped card built lazily: it draws its own share of the
+/// card (rounded at the ends) and the hairline below it.
+class GroupedTile extends StatelessWidget {
+  final Widget child;
+  final bool first, last, selected;
+  final VoidCallback? onTap;
+  final void Function(Offset position)? onMenu;
+  final double indent;
+  const GroupedTile({
+    super.key,
+    required this.child,
+    this.first = false,
+    this.last = false,
+    this.selected = false,
+    this.onTap,
+    this.onMenu,
+    this.indent = 16,
+  });
   @override
   Widget build(BuildContext context) {
-    final c = phase == 'normal' || phase == 'idle'
-        ? SpanColors.of(context).muted
-        : phaseColor(context, phase);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: .12),
-        borderRadius: BorderRadius.circular(6),
+    final colors = SpanColors.of(context);
+    final radius = BorderRadius.vertical(
+      top: Radius.circular(first ? 12 : 0),
+      bottom: Radius.circular(last ? 12 : 0),
+    );
+    return Material(
+      color: selected ? colors.soft : colors.panel,
+      borderRadius: radius,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GestureDetector(
+            onLongPressStart: onMenu == null
+                ? null
+                : (d) => onMenu!(d.globalPosition),
+            onSecondaryTapDown: onMenu == null
+                ? null
+                : (d) => onMenu!(d.globalPosition),
+            child: InkWell(onTap: onTap, child: child),
+          ),
+          if (!last) Divider(indent: indent, height: 1),
+        ],
       ),
-      child: Text(
-        phaseLabels[phase] ?? '未知阶段',
-        style: TextStyle(color: c, fontSize: 12, fontWeight: FontWeight.w600),
+    );
+  }
+}
+
+/// Builds grouped tiles for [items] with first/last flags.
+List<Widget> groupedTiles<T>(
+  List<T> items,
+  Widget Function(T item, bool first, bool last) build,
+) => [
+  for (var i = 0; i < items.length; i++)
+    build(items[i], i == 0, i == items.length - 1),
+];
+
+/// Settings-style row: label on the left, value and disclosure on the right.
+class ValueRow extends StatelessWidget {
+  final String label;
+  final String? value;
+  final Widget? trailing;
+  final IconData? icon;
+  final VoidCallback? onTap;
+  final bool chevron;
+  final Color? color, valueColor;
+  const ValueRow(
+    this.label, {
+    super.key,
+    this.value,
+    this.trailing,
+    this.icon,
+    this.onTap,
+    bool? chevron,
+    this.color,
+    this.valueColor,
+  }) : chevron = chevron ?? onTap != null;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = SpanColors.of(context);
+    return MergeSemantics(
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+            child: Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(
+                    icon,
+                    size: 22,
+                    color: color ?? theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 14),
+                ],
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final labelText = Text(
+                        label,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: color,
+                        ),
+                      );
+                      if (value == null || value!.isEmpty) return labelText;
+                      // The label keeps its natural width (up to ~60%); the
+                      // value takes the rest and hugs the trailing edge.
+                      return Row(
+                        children: [
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: constraints.maxWidth * .62,
+                            ),
+                            child: labelText,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              value!,
+                              textAlign: TextAlign.end,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: valueColor ?? colors.muted,
+                                fontFeatures: tabular,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+                ?trailing,
+                if (chevron)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Icon(
+                      Icons.chevron_right,
+                      size: 20,
+                      color: colors.muted.withValues(alpha: .7),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Settings-style switch row.
+class SwitchRow extends StatelessWidget {
+  final String label;
+  final String? detail;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final Key? switchKey;
+  const SwitchRow(
+    this.label, {
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.detail,
+    this.switchKey,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MergeSemantics(
+      child: InkWell(
+        onTap: onChanged == null ? null : () => onChanged!(!value),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 10, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: theme.textTheme.bodyLarge),
+                    if (detail != null)
+                      Text(detail!, style: theme.textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              Switch(key: switchKey, value: value, onChanged: onChanged),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -486,7 +995,7 @@ class IconTile extends StatelessWidget {
   final IconData icon;
   final Color? color;
   final double size;
-  const IconTile(this.icon, {super.key, this.color, this.size = 36});
+  const IconTile(this.icon, {super.key, this.color, this.size = 32});
   @override
   Widget build(BuildContext context) {
     final c = color ?? Theme.of(context).colorScheme.primary;
@@ -495,10 +1004,10 @@ class IconTile extends StatelessWidget {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: c.withValues(alpha: .12),
-          borderRadius: BorderRadius.circular(size * .3),
+          color: c.withValues(alpha: .13),
+          borderRadius: BorderRadius.circular(size * .28),
         ),
-        child: Icon(icon, size: size * .55, color: c),
+        child: Icon(icon, size: size * .58, color: c),
       ),
     );
   }
@@ -518,40 +1027,317 @@ class EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = SpanColors.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 56, horizontal: 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconTile(icon, size: 52, color: SpanColors.of(context).muted),
-          const SizedBox(height: 16),
-          Text(title, style: theme.textTheme.titleMedium),
+          Icon(icon, size: 48, color: colors.muted.withValues(alpha: .55)),
+          const SizedBox(height: 14),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleLarge,
+          ),
           const SizedBox(height: 6),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
+            style: theme.textTheme.bodyMedium?.copyWith(color: colors.muted),
           ),
-          if (action != null) ...[const SizedBox(height: 20), action!],
+          if (action != null) ...[const SizedBox(height: 18), action!],
         ],
       ),
     );
   }
 }
 
-/// Centers page content on wide screens without changing phone layout.
-class Readable extends StatelessWidget {
-  final Widget child;
-  final double maxWidth;
-  const Readable({super.key, required this.child, this.maxWidth = 760});
+/// Chip label that stays readable on the accent fill when selected.
+class SpanChipLabel extends StatelessWidget {
+  final String text;
+  final bool selected;
+  const SpanChipLabel(this.text, {super.key, required this.selected});
   @override
-  Widget build(BuildContext context) => Align(
-    alignment: Alignment.topCenter,
-    child: ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxWidth),
-      child: SizedBox(width: double.infinity, child: child),
-    ),
+  Widget build(BuildContext context) => Text(
+    text,
+    style: selected
+        ? TextStyle(color: Theme.of(context).colorScheme.onPrimary)
+        : null,
   );
 }
 
-const tabular = [FontFeature.tabularFigures()];
+/// Positions a popup menu at a global point (long press or right click).
+Future<T?> showMenuAt<T>(
+  BuildContext context,
+  Offset position,
+  List<PopupMenuEntry<T>> items,
+) {
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  return showMenu<T>(
+    context: context,
+    position: RelativeRect.fromRect(
+      position & const Size(1, 1),
+      Offset.zero & overlay.size,
+    ),
+    items: items,
+  );
+}
+
+/// One row of a [showContextMenu] panel.
+class MenuAction<T> {
+  final T value;
+  final String label;
+  final IconData icon;
+  final bool destructive, enabled;
+  const MenuAction(
+    this.value,
+    this.label,
+    this.icon, {
+    this.destructive = false,
+    this.enabled = true,
+  });
+}
+
+/// Long-press / right-click menu: a frosted panel beside the press point with
+/// the subject's name as a gray header, then groups of actions with the icon
+/// in front. Put a destructive action in its own last group. AQ draws its
+/// context menus with the same layout.
+Future<T?> showContextMenu<T>(
+  BuildContext context,
+  Offset position, {
+  String? title,
+  required List<List<MenuAction<T>>> sections,
+}) {
+  HapticFeedback.selectionClick();
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: '关闭菜单',
+    barrierColor: Colors.black.withValues(alpha: .12),
+    // Reduced motion: the menu fades in without growing.
+    transitionDuration: const Duration(milliseconds: 160),
+    pageBuilder: (context, animation, _) {
+      final media = MediaQuery.of(context);
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeIn,
+      );
+      return CustomSingleChildLayout(
+        delegate: _ContextMenuLayout(position, media.padding),
+        child: FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween(
+              begin: media.disableAnimations ? 1.0 : .92,
+              end: 1.0,
+            ).animate(curved),
+            child: _ContextMenuPanel<T>(title: title, sections: sections),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class _ContextMenuLayout extends SingleChildLayoutDelegate {
+  final Offset position;
+  final EdgeInsets padding;
+  const _ContextMenuLayout(this.position, this.padding);
+  static const margin = 8.0;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints.loose(
+        Size(
+          math.min(260, constraints.maxWidth - margin * 2),
+          constraints.maxHeight - padding.vertical - margin * 2,
+        ),
+      );
+
+  @override
+  Offset getPositionForChild(Size size, Size child) {
+    double place(double at, double extent, double min, double max) {
+      // Open toward the free side of the press point, then keep it on screen.
+      final start = at + extent > max ? at - extent : at;
+      return start.clamp(min, math.max(min, max - extent));
+    }
+
+    return Offset(
+      place(
+        position.dx,
+        child.width,
+        padding.left + margin,
+        size.width - padding.right - margin,
+      ),
+      place(
+        position.dy,
+        child.height,
+        padding.top + margin,
+        size.height - padding.bottom - margin,
+      ),
+    );
+  }
+
+  @override
+  bool shouldRelayout(_ContextMenuLayout old) =>
+      old.position != position || old.padding != padding;
+}
+
+class _ContextMenuPanel<T> extends StatelessWidget {
+  final String? title;
+  final List<List<MenuAction<T>>> sections;
+  const _ContextMenuPanel({required this.title, required this.sections});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = SpanColors.of(context);
+    final contrast = MediaQuery.highContrastOf(context);
+    final dark = theme.brightness == Brightness.dark;
+    final shape = RoundedSuperellipseBorder(
+      borderRadius: BorderRadius.circular(14),
+      side: BorderSide(
+        color: contrast ? colors.line : colors.line.withValues(alpha: .6),
+        width: contrast ? 1 : .5,
+      ),
+    );
+    final groups = [
+      for (final s in sections)
+        if (s.isNotEmpty) s,
+    ];
+    final rows = <Widget>[
+      if (title != null) ...[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 11, 16, 10),
+          child: Text(
+            title!,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Divider(height: .5, thickness: .5, color: colors.line),
+      ],
+      for (final (g, group) in groups.indexed) ...[
+        if (g > 0)
+          ColoredBox(
+            color: colors.line.withValues(alpha: .45),
+            child: const SizedBox(height: 6),
+          ),
+        for (final (i, action) in group.indexed) ...[
+          if (i > 0)
+            Divider(
+              height: .5,
+              thickness: .5,
+              indent: 48,
+              color: colors.line.withValues(alpha: .7),
+            ),
+          _ContextMenuRow<T>(action),
+        ],
+      ],
+    ];
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        shape: shape,
+        shadows: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? .35 : .1),
+            blurRadius: 24,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipPath(
+        clipper: ShapeBorderClipper(shape: shape),
+        child: BackdropFilter(
+          enabled: !contrast,
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Material(
+            color: colors.panel.withValues(alpha: contrast ? 1 : .86),
+            shape: shape,
+            child: IntrinsicWidth(
+              stepWidth: 56,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: rows,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ContextMenuRow<T> extends StatelessWidget {
+  final MenuAction<T> action;
+  const _ContextMenuRow(this.action);
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = SpanColors.of(context).muted;
+    final color = !action.enabled
+        ? muted.withValues(alpha: .6)
+        : action.destructive
+        ? theme.colorScheme.error
+        : theme.colorScheme.onSurface;
+    return InkWell(
+      onTap: action.enabled
+          ? () => Navigator.pop<T>(context, action.value)
+          : null,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 46, minWidth: 200),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(action.icon, size: 20, color: color),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  action.label,
+                  style: theme.textTheme.bodyLarge?.copyWith(color: color),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Menu row with an icon on the right, as in system context menus.
+PopupMenuItem<T> menuItem<T>(
+  T value,
+  String label,
+  IconData icon, {
+  bool destructive = false,
+  bool enabled = true,
+  Key? key,
+}) => PopupMenuItem<T>(
+  key: key,
+  value: value,
+  enabled: enabled,
+  child: Builder(
+    builder: (context) {
+      final color = destructive ? Theme.of(context).colorScheme.error : null;
+      return Row(
+        children: [
+          Expanded(
+            child: Text(label, style: TextStyle(color: color)),
+          ),
+          const SizedBox(width: 16),
+          Icon(icon, size: 20, color: color),
+        ],
+      );
+    },
+  ),
+);

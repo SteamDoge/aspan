@@ -9,30 +9,15 @@ import 'editor.dart';
 import 'widgets.dart';
 
 void openRule(BuildContext context, SpanStore store, String id) =>
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => RuleDetail(store: store, id: id),
-      ),
-    );
+    push(context, RuleDetail(store: store, id: id));
 void openGroup(BuildContext context, SpanStore store, String id) =>
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => GroupDetail(store: store, id: id),
-      ),
-    );
+    push(context, GroupDetail(store: store, id: id));
 void openAccount(
   BuildContext context,
   SpanStore store,
   String id, {
   String? rule,
-}) => Navigator.push(
-  context,
-  MaterialPageRoute<void>(
-    builder: (_) => AccountDetail(store: store, id: id, rule: rule),
-  ),
-);
+}) => push(context, AccountDetail(store: store, id: id, rule: rule));
 
 String statusLabel(String value) => switch (value) {
   'pending' => '待处理',
@@ -70,14 +55,65 @@ String historyDetail(Json h) {
 Widget historyRow(BuildContext context, Json h) {
   final detail = historyDetail(h);
   return ListTile(
-    dense: true,
-    leading: const Icon(Icons.history, size: 20),
     title: Text(actionLabel(h['action'] as String)),
     subtitle: Text(
       detail.isEmpty
           ? friendlyDate(h['date'] as String)
           : '${friendlyDate(h['date'] as String)} · $detail',
     ),
+  );
+}
+
+List<Json> historyOf(SpanStore store, String id) =>
+    (store.state['history'] as List)
+        .map(object)
+        .where((h) => h['subject'] == id)
+        .toList()
+        .reversed
+        .toList();
+
+/// A long record list on its own page, built lazily row by row.
+class RecordsPage extends StatelessWidget {
+  final String title;
+  final SpanStore store;
+  final List<Json> Function() items;
+  final Widget Function(BuildContext, Json) row;
+  final String empty;
+  final void Function(BuildContext, Json)? onTap;
+  const RecordsPage({
+    super.key,
+    required this.title,
+    required this.store,
+    required this.items,
+    required this.row,
+    this.empty = '暂无记录',
+    this.onTap,
+  });
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: store,
+    builder: (context, _) {
+      final list = items();
+      return SpanPage(
+        title: title,
+        subtitle: Text('${list.length} 条'),
+        slivers: [
+          boxes([const SizedBox(height: 12)]),
+          if (list.isEmpty)
+            boxes([EmptyState(empty, '', icon: Icons.history)])
+          else
+            SliverList.builder(
+              itemCount: list.length,
+              itemBuilder: (context, i) => GroupedTile(
+                first: i == 0,
+                last: i == list.length - 1,
+                onTap: onTap == null ? null : () => onTap!(context, list[i]),
+                child: row(context, list[i]),
+              ),
+            ),
+        ],
+      );
+    },
   );
 }
 
@@ -106,8 +142,8 @@ class RuleDetail extends StatelessWidget {
           aid = rule['account'] as String?;
       final phase = v['phase'] as String;
       final days = v['remaining_days'] as int?;
-      final urgent = actionPhases.contains(phase);
-      final accent = urgent || phase == 'reminder'
+      final flagged = actionPhases.contains(phase) || phase == 'reminder';
+      final accent = flagged
           ? phaseColor(context, phase)
           : theme.colorScheme.primary;
       final schedule = rule['schedule'] as Map?;
@@ -117,7 +153,7 @@ class RuleDetail extends StatelessWidget {
       final project = rule['project'] == null
           ? null
           : store.state['projects'][rule['project']]?['name'];
-      final occurrences =
+      List<Json> occurrences() =>
           objects(store.state['occurrences'])
               .where((o) => o['rule'] == id)
               .toList()
@@ -125,106 +161,46 @@ class RuleDetail extends StatelessWidget {
               (a, b) =>
                   b['planned'].toString().compareTo(a['planned'].toString()),
             );
-      final history = (store.state['history'] as List)
-          .map(object)
-          .where((h) => h['subject'] == id)
-          .toList()
-          .reversed
-          .toList();
+      final occurrenceCount = occurrences().length;
+      final historyCount = historyOf(store, id).length;
       final completeLabel = rule['reset'] != null
           ? '完成并恢复额度'
           : rule['change'] != null
-          ? '确认发生并记录'
-          : '标记完成';
+          ? '完成并记账'
+          : '完成本期';
       final graceDays = rule['reminder']['grace_days'] as int? ?? 0;
+      final location = [
+        project ?? '未归类',
+        for (final t in rule['tags'] as List)
+          '#${store.state['tags'][t]?['name'] ?? ''}',
+      ].join('  ');
 
       final children = <Widget>[
-        // Identity: what is this and where does it live.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              IconTile(
-                ruleIcon(rule['icon'] as String?),
-                size: 48,
-                color: accent,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      rule['name'] as String,
-                      style: theme.textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        PhaseBadge(phase),
-                        Text(
-                          project == null ? '未归类' : '$project',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        for (final t in rule['tags'] as List)
-                          Text(
-                            '#${store.state['tags'][t]?['name'] ?? ''}',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (group != null) ...[
-          const SizedBox(height: 12),
-          Panel(
-            children: [
-              ListTile(
-                leading: const Icon(Icons.layers_outlined),
-                title: Text('属于合并条目「${group['name']}」'),
-                subtitle: const Text('共享账户；周期、提醒与历史独立'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => openGroup(context, store, group['id'] as String),
-              ),
-            ],
-          ),
-        ],
-        const SizedBox(height: 16),
-        // Current period: the one thing a user comes here to act on.
+        const SizedBox(height: 12),
         if (v['planned'] != null)
           Panel(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
             dividerIndent: -1,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    relativeDays(days!),
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      color: urgent ? accent : null,
-                      fontFeatures: tabular,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '下次事件 ${friendlyDate(v['planned'] as String)}',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ),
-                ],
+              Text(
+                relativeDays(days!),
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  color: flagged ? accent : null,
+                  fontFeatures: tabular,
+                ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 2),
+              Text(
+                [
+                  if (const ['reminder', 'grace', 'processing'].contains(phase))
+                    phaseLabels[phase],
+                  friendlyDate(v['planned'] as String),
+                ].join(' · '),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: SpanColors.of(context).muted,
+                ),
+              ),
+              const SizedBox(height: 16),
               TimelineBar(
                 segments: v['segments'] == null ? null : object(v['segments']),
                 progress: (v['time_progress'] as num? ?? 0).toDouble(),
@@ -232,11 +208,11 @@ class RuleDetail extends StatelessWidget {
                 graceDays: graceDays,
                 color: accent,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Row(
                 children: [
                   Text(
-                    '周期已过 ${(((v['time_progress'] as num?) ?? 0) * 100).round()}%',
+                    '已过 ${(((v['time_progress'] as num?) ?? 0) * 100).round()}%',
                     style: theme.textTheme.bodySmall,
                   ),
                   const Spacer(),
@@ -244,7 +220,7 @@ class RuleDetail extends StatelessWidget {
                     child: Text(
                       v['next_reminder'] == null
                           ? '本期无后续提醒'
-                          : '下一提醒 ${friendlyDate(v['next_reminder'] as String, weekday: false)}',
+                          : '下次提醒 ${friendlyDate(v['next_reminder'] as String, weekday: false)}',
                       textAlign: TextAlign.end,
                       style: theme.textTheme.bodySmall,
                     ),
@@ -252,58 +228,42 @@ class RuleDetail extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final primary = FilledButton.icon(
-                    key: const ValueKey('complete-event'),
-                    onPressed: () =>
-                        eventSheet(context, store, rule, 'completed'),
-                    icon: const Icon(Icons.check),
-                    label: Text(completeLabel),
-                  );
-                  final secondary = [
-                    if (phase != 'processing')
-                      OutlinedButton(
-                        onPressed: () =>
-                            eventSheet(context, store, rule, 'processing'),
-                        child: const Text('处理中'),
-                      ),
-                    PopupMenuButton<String>(
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      key: const ValueKey('complete-event'),
+                      onPressed: () =>
+                          eventSheet(context, store, rule, 'completed'),
+                      icon: const Icon(Icons.check_rounded),
+                      label: Text(completeLabel),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Material(
+                    color: SpanColors.of(context).fill,
+                    borderRadius: BorderRadius.circular(12),
+                    child: PopupMenuButton<String>(
+                      key: const ValueKey('period-menu'),
                       tooltip: '本期其他处理',
-                      icon: const Icon(Icons.more_horiz),
+                      icon: Icon(
+                        Icons.more_horiz_rounded,
+                        color: theme.colorScheme.primary,
+                      ),
                       onSelected: (s) => eventSheet(context, store, rule, s),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'skipped', child: Text('跳过本期')),
-                        PopupMenuItem(value: 'failed', child: Text('失败或放弃')),
+                      itemBuilder: (_) => [
+                        if (phase != 'processing')
+                          menuItem(
+                            'processing',
+                            '标记处理中',
+                            Icons.pending_outlined,
+                          ),
+                        menuItem('skipped', '跳过本期', Icons.redo_rounded),
+                        menuItem('failed', '失败或放弃', Icons.cancel_outlined),
                       ],
                     ),
-                  ];
-                  // Large text on narrow phones: give the primary action its
-                  // own full-width row instead of squeezing its label.
-                  final stacked =
-                      constraints.maxWidth <
-                      300 * MediaQuery.textScalerOf(context).scale(1);
-                  if (stacked) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        primary,
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: secondary,
-                        ),
-                      ],
-                    );
-                  }
-                  return Row(
-                    children: [
-                      Expanded(child: primary),
-                      const SizedBox(width: 8),
-                      ...secondary,
-                    ],
-                  );
-                },
+                  ),
+                ],
               ),
             ],
           )
@@ -313,131 +273,126 @@ class RuleDetail extends StatelessWidget {
             icon: Icons.event_busy_outlined,
           ),
         if (schedule != null) ...[
-          const SizedBox(height: 12),
+          const SectionHeader('周期', large: false),
           Panel(
             children: [
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.repeat, size: 20),
-                title: Text(cycleLabel(object(schedule['cycle']))),
-                subtitle: Text(
-                  schedule['cycle']['kind'] == 'restart'
-                      ? '下一期从实际完成日期起算'
-                      : '按计划日历推进，晚确认不改变周期',
+              ValueRow('重复', value: cycleLabel(object(schedule['cycle']))),
+              ValueRow('提醒', value: reminderSummary(object(rule['reminder']))),
+              ValueRow(
+                '起算',
+                value: friendlyDate(
+                  schedule['anchor'] as String?,
+                  weekday: false,
                 ),
               ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.notifications_none, size: 20),
-                title: Text(reminderSummary(object(rule['reminder']))),
-                subtitle: const Text('应用内提醒计划；系统通知尚未接入'),
+            ],
+          ),
+          SectionFooter(
+            '${schedule['cycle']['kind'] == 'restart' ? '下一期从实际完成日期起算。' : '按计划日期推进，晚确认不改变周期。'}'
+            '提醒只在应用内显示，系统通知尚未接入。',
+          ),
+        ],
+        if (group != null) ...[
+          const SectionHeader('合并条目', large: false),
+          Panel(
+            children: [
+              ValueRow(
+                group['name'] as String,
+                icon: Icons.layers_outlined,
+                onTap: () => openGroup(context, store, group['id'] as String),
+              ),
+            ],
+          ),
+          const SectionFooter('与其他成员共享账户；周期、提醒和历史各自独立。'),
+        ],
+        if (aid != null) ...[
+          SectionHeader(group == null ? '资源' : '共享资源', large: false),
+          ResourceCard(store: store, account: aid, rule: id),
+        ],
+        if ((rule['notes'] as String).isNotEmpty) ...[
+          const SectionHeader('备注', large: false),
+          Panel(
+            padding: const EdgeInsets.all(16),
+            children: [
+              SelectableText(
+                rule['notes'] as String,
+                style: theme.textTheme.bodyLarge,
               ),
             ],
           ),
         ],
-        if (aid != null) ...[
-          SectionHeader(group == null ? '资源账户' : '共享资源账户'),
-          ResourceCard(store: store, account: aid, rule: id),
-        ],
-        if ((rule['notes'] as String).isNotEmpty) ...[
-          const SectionHeader('备注'),
-          Panel(
-            padding: const EdgeInsets.all(16),
-            children: [SelectableText(rule['notes'] as String)],
-          ),
-        ],
-        SectionHeader('周期记录', note: '${occurrences.length}'),
-        if (occurrences.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              '完成、跳过或处理后，每一期都会在这里保留记录。',
-              style: theme.textTheme.bodySmall,
+        const SectionHeader('记录', large: false),
+        Panel(
+          children: [
+            ValueRow(
+              '周期记录',
+              key: const ValueKey('open-occurrences'),
+              value: '$occurrenceCount',
+              onTap: () => push(
+                context,
+                RecordsPage(
+                  title: '周期记录',
+                  store: store,
+                  items: occurrences,
+                  empty: '完成、跳过或处理后，每一期都会留在这里',
+                  row: occurrenceRow,
+                ),
+              ),
             ),
-          )
-        else
-          PagedItems(
-            key: ValueKey('occurrences-$id'),
-            items: occurrences,
-            itemBuilder: (o) => occurrenceRow(context, o),
-          ),
-        SectionHeader('操作历史', note: '${history.length}'),
-        PagedItems(
-          key: ValueKey('history-$id'),
-          items: history,
-          itemBuilder: (h) => historyRow(context, h),
-        ),
-      ];
-      return Scaffold(
-        appBar: AppBar(
-          actions: [
-            IconButton(
-              key: const ValueKey('edit-rule'),
-              tooltip: '编辑规则',
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: () => openCreator(context, store, rule: rule),
+            ValueRow(
+              '操作历史',
+              key: const ValueKey('open-history'),
+              value: '$historyCount',
+              onTap: () => push(
+                context,
+                RecordsPage(
+                  title: '操作历史',
+                  store: store,
+                  items: () => historyOf(store, id),
+                  row: historyRow,
+                ),
+              ),
             ),
-            PopupMenuButton<String>(
-              key: const ValueKey('rule-menu'),
-              tooltip: '更多规则操作',
-              onSelected: (action) => switch (action) {
-                'copy' => copyEntry(context, store, id),
-                'move' => perform(
-                  context,
-                  () => moveEntry(context, store, rule),
-                ),
-                'template' => saveAsTemplate(context, store, rule),
-                'delete' => deleteRule(context, store, id),
-                _ => null,
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'copy',
-                  child: ListTile(
-                    leading: Icon(Icons.copy_outlined),
-                    title: Text('完整复制'),
-                    subtitle: Text('含历史、账户与余额'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'template',
-                  child: ListTile(
-                    leading: Icon(Icons.bookmark_add_outlined),
-                    title: Text('保存为模板'),
-                    subtitle: Text('仅保留配置'),
-                  ),
-                ),
-                if (group == null)
-                  const PopupMenuItem(
-                    value: 'move',
-                    child: ListTile(
-                      leading: Icon(Icons.drive_file_move_outlined),
-                      title: Text('移动到小项目'),
-                    ),
-                  ),
-                const PopupMenuDivider(),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.delete_outline,
-                      color: theme.colorScheme.error,
-                    ),
-                    title: Text(
-                      '删除规则',
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 4),
           ],
         ),
-        body: ListView(
-          padding: pagePadding(context, top: 0),
-          children: [for (final c in children) Readable(child: c)],
-        ),
+      ];
+      return SpanPage(
+        title: rule['name'] as String,
+        subtitle: Text(location),
+        maxWidth: 680,
+        actions: [
+          TextButton(
+            key: const ValueKey('edit-rule'),
+            onPressed: () => openCreator(context, store, rule: rule),
+            child: const Text('编辑'),
+          ),
+          PopupMenuButton<String>(
+            key: const ValueKey('rule-menu'),
+            tooltip: '更多',
+            icon: const Icon(Icons.more_horiz_rounded),
+            onSelected: (action) => switch (action) {
+              'copy' => copyEntry(context, store, id),
+              'move' => perform(context, () => moveEntry(context, store, rule)),
+              'template' => saveAsTemplate(context, store, rule),
+              'delete' => deleteRule(context, store, id),
+              _ => null,
+            },
+            itemBuilder: (_) => [
+              menuItem('copy', '完整复制', Icons.copy_outlined),
+              menuItem('template', '存为模板', Icons.bookmark_add_outlined),
+              if (group == null)
+                menuItem('move', '移动到…', Icons.folder_outlined),
+              const PopupMenuDivider(),
+              menuItem(
+                'delete',
+                '删除规则',
+                Icons.delete_outline,
+                destructive: true,
+              ),
+            ],
+          ),
+        ],
+        slivers: [boxes(children)],
       );
     },
   );
@@ -452,30 +407,110 @@ Widget occurrenceRow(BuildContext context, Json o) {
     _ => SpanColors.of(context).muted,
   };
   final icon = switch (status) {
-    'completed' => Icons.check_circle_outline,
-    'processing' => Icons.pending_outlined,
-    'skipped' => Icons.redo,
-    'failed' => Icons.cancel_outlined,
+    'completed' => Icons.check_circle,
+    'processing' => Icons.pending,
+    'skipped' => Icons.redo_rounded,
+    'failed' => Icons.cancel,
     _ => Icons.radio_button_unchecked,
   };
   final windowEnd = o['window_end'] != o['planned'];
+  final detail = [
+    if (o['actual'] != null)
+      '实际 ${friendlyDate(o['actual'] as String, weekday: false)}',
+    if (o['completed'] != null)
+      '处理于 ${friendlyDate(o['completed'] as String, weekday: false)}',
+    if (windowEnd)
+      '窗口至 ${friendlyDate(o['window_end'] as String, weekday: false)}',
+  ].join(' · ');
   return ListTile(
-    dense: true,
-    leading: Icon(icon, color: color, size: 20),
-    title: Text(
-      '${friendlyDate(o['planned'] as String)} · ${statusLabel(status)}',
-    ),
+    leading: Icon(icon, color: color, size: 22),
+    title: Text(friendlyDate(o['planned'] as String)),
     subtitle: Text(
-      [
-        if (o['actual'] != null)
-          '实际 ${friendlyDate(o['actual'] as String, weekday: false)}',
-        if (o['completed'] != null)
-          '处理于 ${friendlyDate(o['completed'] as String, weekday: false)}',
-        if (windowEnd)
-          '窗口至 ${friendlyDate(o['window_end'] as String, weekday: false)}',
-      ].join(' · '),
+      detail.isEmpty ? statusLabel(status) : '${statusLabel(status)} · $detail',
     ),
   );
+}
+
+/// Long-press / right-click actions for a rule row.
+Future<void> ruleMenu(
+  BuildContext context,
+  SpanStore store,
+  Json rule,
+  Offset position, {
+  VoidCallback? onSelect,
+}) async {
+  final id = rule['id'] as String;
+  final planned = store.view(id)['planned'];
+  final action = await showContextMenu<String>(
+    context,
+    position,
+    title: rule['name'] as String?,
+    sections: [
+      [
+        if (planned != null)
+          const MenuAction('complete', '完成本期', Icons.check_circle_outline),
+        const MenuAction('copy', '完整复制', Icons.copy_outlined),
+        if (onSelect != null)
+          const MenuAction('select', '选择', Icons.checklist_rounded),
+      ],
+      [
+        if (rule['group'] == null)
+          const MenuAction('move', '移动到…', Icons.drive_file_move_outlined),
+      ],
+      [
+        const MenuAction(
+          'delete',
+          '删除',
+          Icons.delete_outline,
+          destructive: true,
+        ),
+      ],
+    ],
+  );
+  if (action == null || !context.mounted) return;
+  switch (action) {
+    case 'complete':
+      await eventSheet(context, store, rule, 'completed');
+    case 'move':
+      await perform(context, () => moveEntry(context, store, rule));
+    case 'copy':
+      await copyEntry(context, store, id);
+    case 'select':
+      onSelect?.call();
+    case 'delete':
+      await deleteRule(context, store, id, leave: false);
+  }
+}
+
+/// Long-press / right-click actions for a merged entry row.
+Future<void> groupMenu(
+  BuildContext context,
+  SpanStore store,
+  Json group,
+  Offset position,
+) async {
+  final id = group['id'] as String;
+  final action = await showContextMenu<String>(
+    context,
+    position,
+    title: group['name'] as String?,
+    sections: const [
+      [
+        MenuAction('open', '打开', Icons.layers_outlined),
+        MenuAction('copy', '完整复制', Icons.copy_outlined),
+      ],
+      [MenuAction('move', '移动到…', Icons.drive_file_move_outlined)],
+    ],
+  );
+  if (action == null || !context.mounted) return;
+  switch (action) {
+    case 'open':
+      openGroup(context, store, id);
+    case 'move':
+      await perform(context, () => moveEntry(context, store, object(group)));
+    case 'copy':
+      await copyEntry(context, store, id);
+  }
 }
 
 Future<void> copyEntry(BuildContext context, SpanStore store, String id) async {
@@ -490,7 +525,7 @@ Future<void> copyEntry(BuildContext context, SpanStore store, String id) async {
         SnackBar(
           content: Text(isGroup ? '已复制全部成员、账户与历史' : '已完整复制，副本拥有独立账户与历史'),
           action: SnackBarAction(
-            label: '查看副本',
+            label: '查看',
             onPressed: () => isGroup
                 ? openGroup(context, store, copy)
                 : openRule(context, store, copy),
@@ -502,74 +537,84 @@ Future<void> copyEntry(BuildContext context, SpanStore store, String id) async {
   }
 }
 
-Future<void> deleteRule(BuildContext context, SpanStore store, String id) =>
-    perform(context, () async {
-      final baseRevision = store.revision;
-      final inGroup = store.state['rules'][id]['group'] != null;
-      if (!await confirm(
-        context,
-        '删除这条规则？',
-        '规则移入历史，不再提醒。已发生的流水和共享余额会保留'
-            '${inGroup ? '；合并条目只剩一个成员时自动退化为普通规则' : ''}。此操作无法撤销。',
-        action: '删除',
-        destructive: true,
-      )) {
-        return;
-      }
-      await store.mutate('delete_rule', {'id': id}, baseRevision: baseRevision);
-      if (context.mounted) {
-        Navigator.pop(context);
-        notify(context, '规则已删除，流水保留');
-      }
-    });
+Future<void> deleteRule(
+  BuildContext context,
+  SpanStore store,
+  String id, {
+  bool leave = true,
+}) => perform(context, () async {
+  final baseRevision = store.revision;
+  final inGroup = store.state['rules'][id]['group'] != null;
+  if (!await confirm(
+    context,
+    '删除这条规则？',
+    '规则移入历史，不再提醒。已发生的流水和共享余额会保留'
+        '${inGroup ? '；合并条目只剩一个成员时自动变回普通规则' : ''}。此操作无法撤销。',
+    action: '删除',
+    destructive: true,
+  )) {
+    return;
+  }
+  await store.mutate('delete_rule', {'id': id}, baseRevision: baseRevision);
+  if (context.mounted) {
+    if (leave) Navigator.pop(context);
+    notify(context, '规则已删除，流水保留');
+  }
+});
 
-Future<void> saveAsTemplate(BuildContext context, SpanStore store, Json rule) =>
-    perform(context, () async {
-      final baseRevision = store.revision;
-      final aid = rule['account'] as String?;
-      final name = await askText(
-        context,
-        '保存为我的模板',
-        initial: rule['name'] as String,
-        label: '模板名称',
-        helper: '模板只保存配置（含当前日期），不含余额与历史',
-        action: '保存',
-      );
-      if (name == null) return;
-      final precision = aid == null
-          ? 0
-          : store.state['accounts'][aid]['unit']['precision'] as int;
-      final config = object(rule)
-        ..remove('id')
-        ..remove('group')
-        ..remove('account')
-        ..remove('order')
-        ..remove('deleted');
-      config['change'] = rule['change'] == null
-          ? null
-          : formatUnits(rule['change'] as int, precision);
-      config['reset'] = rule['reset'] == null
-          ? null
-          : formatUnits(rule['reset'] as int, precision);
-      if (aid != null) {
-        final ac = store.state['accounts'][aid];
-        config['new_account'] = {
-          'name': name,
-          'unit': ac['unit'],
-          'initial': '0',
-          'reference': ac['reference'] == null
-              ? null
-              : formatUnits(ac['reference'] as int, precision),
-          'low': ac['low'] == null
-              ? null
-              : formatUnits(ac['low'] as int, precision),
-        };
-      }
-      await store.mutate('save_template', {
+/// Asks first: a cancelled dialog writes nothing and reports nothing.
+Future<void> saveAsTemplate(
+  BuildContext context,
+  SpanStore store,
+  Json rule,
+) async {
+  final baseRevision = store.revision;
+  final name = await askText(
+    context,
+    '存为我的模板',
+    initial: rule['name'] as String,
+    label: '模板名称',
+    helper: '只保存配置（含当前日期），不含余额与历史',
+    action: '保存',
+  );
+  if (name == null || !context.mounted) return;
+  await perform(context, () async {
+    final aid = rule['account'] as String?;
+    final precision = aid == null
+        ? 0
+        : store.state['accounts'][aid]['unit']['precision'] as int;
+    final config = object(rule)
+      ..remove('id')
+      ..remove('group')
+      ..remove('account')
+      ..remove('order')
+      ..remove('deleted');
+    config['change'] = rule['change'] == null
+        ? null
+        : formatUnits(rule['change'] as int, precision);
+    config['reset'] = rule['reset'] == null
+        ? null
+        : formatUnits(rule['reset'] as int, precision);
+    if (aid != null) {
+      final ac = store.state['accounts'][aid];
+      config['new_account'] = {
         'name': name,
-        'config': config,
-      }, baseRevision: baseRevision);
-    }, success: '已保存为模板，新建规则时可直接使用');
+        'unit': ac['unit'],
+        'initial': '0',
+        'reference': ac['reference'] == null
+            ? null
+            : formatUnits(ac['reference'] as int, precision),
+        'low': ac['low'] == null
+            ? null
+            : formatUnits(ac['low'] as int, precision),
+      };
+    }
+    await store.mutate('save_template', {
+      'name': name,
+      'config': config,
+    }, baseRevision: baseRevision);
+  }, success: '已存为模板，新建规则时可直接使用');
+}
 
 /// One sheet for every period decision; shows exactly what will be recorded.
 Future<void> eventSheet(
@@ -607,22 +652,26 @@ Future<void> eventSheet(
   final (title, action, explanation) = switch (status) {
     'completed' => (
       '完成本期',
-      '确认完成',
-      restart ? '下一期从实际发生日期重新计时。' : '下一期仍按原计划日历推进，晚确认不改变周期。',
+      '完成',
+      restart ? '下一期从实际发生日期重新计时。' : '下一期仍按原计划日期推进。',
     ),
-    'processing' => ('标记处理中', '标记处理中', '本期保持在“需要处理”中，直到完成、跳过或放弃。'),
-    'skipped' => ('跳过本期', '跳过本期', '本期结束并推进到下一计划，不产生资源流水。'),
-    _ => ('标记失败或放弃', '确认放弃', '本期结束并推进到下一计划，不产生资源流水。'),
+    'processing' => ('标记处理中', '标记处理中', '本期留在“需要处理”中，直到完成、跳过或放弃。'),
+    'skipped' => ('跳过本期', '跳过', '本期结束并进入下一期，不产生资源流水。'),
+    _ => ('失败或放弃', '确认放弃', '本期结束并进入下一期，不产生资源流水。'),
   };
   final accepted = await showSpanSheet<bool>(
     context,
     (context) => StatefulBuilder(
       builder: (context, setState) => SheetBody(
         title: title,
-        subtitle: '${rule['name']} · 计划 ${friendlyDate(planned)}',
+        subtitle: '${rule['name']} · ${friendlyDate(planned)}',
         content: [
           if (error != null) ...[
-            Callout(error!, color: Theme.of(context).colorScheme.error),
+            Callout(
+              error!,
+              icon: Icons.error_outline,
+              color: Theme.of(context).colorScheme.error,
+            ),
             const SizedBox(height: 12),
           ],
           if (status == 'completed')
@@ -630,13 +679,12 @@ Future<void> eventSheet(
               children: [
                 ListTile(
                   key: const ValueKey('actual-date'),
-                  leading: const Icon(Icons.event_available_outlined),
                   title: const Text('实际发生日期'),
                   trailing: Text(
                     actual == dateOnly(today) ? '今天' : friendlyDate(actual),
                     style: TextStyle(
+                      fontSize: 16,
                       color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   onTap: busy
@@ -655,9 +703,6 @@ Future<void> eventSheet(
                 ),
                 if (effect != null)
                   SwitchListTile(
-                    secondary: const Icon(
-                      Icons.account_balance_wallet_outlined,
-                    ),
                     title: Text('同时$effect'),
                     subtitle: const Text('写入实际流水，可在账户明细中纠正'),
                     value: record,
@@ -665,8 +710,7 @@ Future<void> eventSheet(
                   ),
               ],
             ),
-          const SizedBox(height: 12),
-          Text(explanation, style: Theme.of(context).textTheme.bodySmall),
+          SectionFooter(explanation),
         ],
         actions: [
           OutlinedButton(
@@ -734,6 +778,7 @@ class ResourceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = SpanColors.of(context);
     final ac = store.state['accounts'][account];
     final v = store.accountView(account);
     final p = ac['unit']['precision'] as int;
@@ -744,7 +789,7 @@ class ResourceCard extends StatelessWidget {
         InkWell(
           onTap: () => openAccount(context, store, account, rule: rule),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
+            padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
             child: Row(
               children: [
                 Expanded(
@@ -761,7 +806,8 @@ class ResourceCard extends StatelessWidget {
                           children: [
                             TextSpan(
                               text: v['formatted'] as String,
-                              style: theme.textTheme.headlineSmall?.copyWith(
+                              style: theme.textTheme.headlineMedium?.copyWith(
+                                fontSize: 26,
                                 fontFeatures: tabular,
                                 color: v['low'] == true
                                     ? warningColor(context)
@@ -770,7 +816,9 @@ class ResourceCard extends StatelessWidget {
                             ),
                             TextSpan(
                               text: '  ${v['unit']}',
-                              style: theme.textTheme.bodyMedium,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: colors.muted,
+                              ),
                             ),
                           ],
                         ),
@@ -779,24 +827,24 @@ class ResourceCard extends StatelessWidget {
                   ),
                 ),
                 Text('明细', style: theme.textTheme.bodySmall),
-                const Icon(Icons.chevron_right),
+                Icon(Icons.chevron_right, color: colors.muted),
               ],
             ),
           ),
         ),
         if (v['progress'] != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 LinearProgressIndicator(
                   value: (v['progress'] as num).toDouble(),
-                  minHeight: 4,
+                  color: v['low'] == true ? warningColor(context) : null,
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
-                  '剩余比例 ${((v['progress'] as num) * 100).round()}% · 参考总量 ${formatUnits(ac['reference'] as int, p)}',
+                  '剩余 ${((v['progress'] as num) * 100).round()}% · 参考总量 ${formatUnits(ac['reference'] as int, p)}',
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -804,9 +852,9 @@ class ResourceCard extends StatelessWidget {
           ),
         if (v['low'] == true)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
             child: Text(
-              '已低于不足阈值 ${formatUnits(ac['low'] as int, p)} ${v['unit']}',
+              '已低于提醒阈值 ${formatUnits(ac['low'] as int, p)} ${v['unit']}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: warningColor(context),
               ),
@@ -814,11 +862,11 @@ class ResourceCard extends StatelessWidget {
           ),
         if (ac['archived'] != true)
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
             child: Row(
               children: [
                 Expanded(
-                  child: FilledButton.tonalIcon(
+                  child: OutlinedButton.icon(
                     onPressed: () =>
                         resourceSheet(context, store, account, 'add', rule),
                     icon: const Icon(Icons.add, size: 18),
@@ -838,7 +886,7 @@ class ResourceCard extends StatelessWidget {
             ),
           )
         else
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
       ],
     );
   }
@@ -857,110 +905,89 @@ class GroupDetail extends StatelessWidget {
         return Scaffold(
           appBar: AppBar(),
           body: const EmptyState(
-            '合并条目已退化',
-            '只剩一个成员时，它已成为普通规则，余额与历史保留。',
+            '合并条目已变回普通规则',
+            '只剩一个成员时会自动拆开，余额与历史保留。',
             icon: Icons.layers_clear_outlined,
           ),
         );
       }
-      final theme = Theme.of(context);
       final members = store.ordered(
         store.rules.where((r) => r['group'] == id).toList(),
       );
       final project = g['project'] == null
           ? '未归类'
           : store.state['projects'][g['project']]?['name'] ?? '未归类';
-      final history = (store.state['history'] as List)
-          .map(object)
-          .where((h) => h['subject'] == id)
-          .toList()
-          .reversed
-          .toList();
+      final tags = [
+        for (final tid in store.snapshot['group_tags'][id] as List)
+          '#${store.state['tags'][tid]['name']}',
+      ];
+      final historyCount = historyOf(store, id).length;
       final children = <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const IconTile(Icons.layers_outlined, size: 48),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      g['name'] as String,
-                      style: theme.textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '合并条目 · ${members.length} 条独立规则 · $project',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                    if ((store.snapshot['group_tags'][id] as List).isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          [
-                            for (final tid
-                                in store.snapshot['group_tags'][id] as List)
-                              '#${store.state['tags'][tid]['name']}',
-                          ].join('  '),
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
         if ((g['accounts'] as List).isNotEmpty) ...[
-          const SectionHeader('共享资源', note: '每个账户只计算一次'),
+          const SectionHeader('共享资源', large: false),
           for (final aid in g['accounts'] as List) ...[
             ResourceCard(store: store, account: aid as String),
             const SizedBox(height: 8),
           ],
+          const SectionFooter('每个账户只计算一次，成员共用同一余额。'),
         ],
-        SectionHeader('成员规则', note: '${members.length}'),
-        for (final r in members)
-          RuleTile(
+        SectionHeader('成员', note: '${members.length}', large: false),
+        ...groupedTiles(
+          members,
+          (r, f, l) => RuleRow(
             store: store,
             rule: r,
+            first: f,
+            last: l,
             onTap: () => openRule(context, store, r['id'] as String),
           ),
+        ),
         if ((g['archived_accounts'] as List).isNotEmpty) ...[
-          const SectionHeader('合并前账本', note: '仅作历史证据，不计入共享余额'),
+          const SectionHeader('合并前账本', large: false),
           Panel(
             children: [
               for (final aid in g['archived_accounts'] as List)
-                ListTile(
-                  leading: const Icon(Icons.inventory_2_outlined, size: 20),
-                  title: Text(store.state['accounts'][aid]['name'] as String),
-                  subtitle: Text(
-                    '已归档 · ${store.accountView(aid as String)['formatted']} ${store.accountView(aid)['unit']}',
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
+                ValueRow(
+                  store.state['accounts'][aid]['name'] as String,
+                  value:
+                      '${store.accountView(aid as String)['formatted']} ${store.accountView(aid)['unit']}',
                   onTap: () => openAccount(context, store, aid),
                 ),
             ],
           ),
+          const SectionFooter('仅作历史证据，不计入共享余额。'),
         ],
-        if (history.isNotEmpty) ...[
-          const SectionHeader('操作历史'),
-          PagedItems(
-            key: ValueKey('group-history-$id'),
-            items: history,
-            itemBuilder: (h) => historyRow(context, h),
-          ),
-        ],
+        const SectionHeader('记录', large: false),
+        Panel(
+          children: [
+            ValueRow(
+              '操作历史',
+              value: '$historyCount',
+              onTap: () => push(
+                context,
+                RecordsPage(
+                  title: '操作历史',
+                  store: store,
+                  items: () => historyOf(store, id),
+                  row: historyRow,
+                ),
+              ),
+            ),
+          ],
+        ),
       ];
-      return Scaffold(
-        appBar: AppBar(
-          actions: [
-            IconButton(
-              tooltip: '重命名合并条目',
-              onPressed: () => perform(context, () async {
+      return SpanPage(
+        title: g['name'] as String,
+        subtitle: Text(
+          ['合并条目 · ${members.length} 条规则', project, ...tags].join('  '),
+        ),
+        maxWidth: 680,
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            icon: const Icon(Icons.more_horiz_rounded),
+            onSelected: (action) => switch (action) {
+              'rename' => perform(context, () async {
                 final baseRevision = store.revision;
                 final name = await askText(
                   context,
@@ -975,51 +1002,23 @@ class GroupDetail extends StatelessWidget {
                   }, baseRevision: baseRevision);
                 }
               }),
-              icon: const Icon(Icons.edit_outlined),
-            ),
-            PopupMenuButton<String>(
-              tooltip: '更多合并条目操作',
-              onSelected: (action) => switch (action) {
-                'move' => perform(
-                  context,
-                  () => moveEntry(context, store, object(g)),
-                ),
-                'copy' => copyEntry(context, store, id),
-                'split' => splitGuide(context, store, id),
-                _ => null,
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'move',
-                  child: ListTile(
-                    leading: Icon(Icons.drive_file_move_outlined),
-                    title: Text('移动到小项目'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'copy',
-                  child: ListTile(
-                    leading: Icon(Icons.copy_outlined),
-                    title: Text('完整复制'),
-                    subtitle: Text('全部成员、共享账户与历史'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'split',
-                  child: ListTile(
-                    leading: Icon(Icons.call_split),
-                    title: Text('如何拆分'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 4),
-          ],
-        ),
-        body: ListView(
-          padding: pagePadding(context, top: 0),
-          children: [for (final c in children) Readable(child: c)],
-        ),
+              'move' => perform(
+                context,
+                () => moveEntry(context, store, object(g)),
+              ),
+              'copy' => copyEntry(context, store, id),
+              'split' => splitGuide(context, store, id),
+              _ => null,
+            },
+            itemBuilder: (_) => [
+              menuItem('rename', '重命名', Icons.drive_file_rename_outline),
+              menuItem('move', '移动到…', Icons.folder_outlined),
+              menuItem('copy', '完整复制', Icons.copy_outlined),
+              menuItem('split', '如何拆分', Icons.call_split),
+            ],
+          ),
+        ],
+        slivers: [boxes(children)],
       );
     },
   );
@@ -1035,22 +1034,25 @@ Future<void> splitGuide(
   final go = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('拆分合并条目'),
+      title: const Text('拆分合并条目', textAlign: TextAlign.center),
       content: const Text(
         '为保证两边账户与历史都完整、互不影响，拆分分三步：\n\n'
         '1. 完整复制此合并条目\n'
         '2. 在原条目中删除不需要的成员\n'
         '3. 在副本中删除另一部分成员\n\n'
-        '只剩一个成员时会自动成为普通规则，余额与流水保留。',
+        '只剩一个成员时会自动变回普通规则，余额与流水保留。',
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
           child: const Text('关闭'),
         ),
-        FilledButton(
+        TextButton(
           onPressed: () => Navigator.pop(context, true),
-          child: const Text('第 1 步：完整复制'),
+          child: const Text(
+            '完整复制',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
         ),
       ],
     ),
@@ -1073,6 +1075,7 @@ class AccountDetail extends StatelessWidget {
     listenable: store,
     builder: (context, _) {
       final theme = Theme.of(context);
+      final colors = SpanColors.of(context);
       final ac = store.state['accounts'][id],
           v = store.accountView(id),
           p = ac['unit']['precision'] as int;
@@ -1089,145 +1092,139 @@ class AccountDetail extends StatelessWidget {
                   ? a['id'].toString().compareTo(b['id'].toString())
                   : c;
             });
-      final children = <Widget>[
-        Panel(
-          padding: const EdgeInsets.all(20),
-          dividerIndent: -1,
-          children: [
-            Text(
-              archived ? '归档账本 · 不计入当前共享余量' : '当前余量',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 4),
-            Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: v['formatted'] as String,
-                    style: theme.textTheme.headlineLarge?.copyWith(
-                      fontSize: 34,
-                      fontFeatures: tabular,
-                      color: v['low'] == true ? warningColor(context) : null,
-                    ),
+      final facts = [
+        if (v['progress'] != null)
+          '剩余 ${((v['progress'] as num) * 100).round()}% · 参考总量 ${formatUnits(ac['reference'] as int, p)} ${v['unit']}',
+        if (ac['low'] != null)
+          '低于 ${formatUnits(ac['low'] as int, p)} ${v['unit']} 时提醒${v['low'] == true ? ' · 已低于' : ''}',
+        if (users.isNotEmpty)
+          '${users.length > 1 ? '共享' : '关联'}：${users.map((r) => r['name']).join('、')}',
+      ];
+      final hero = Panel(
+        padding: const EdgeInsets.all(16),
+        dividerIndent: -1,
+        children: [
+          Text(
+            archived ? '归档账本 · 不计入当前共享余量' : '当前余量',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 2),
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: v['formatted'] as String,
+                  style: theme.textTheme.headlineLarge?.copyWith(
+                    fontSize: 36,
+                    fontFeatures: tabular,
+                    color: v['low'] == true ? warningColor(context) : null,
                   ),
-                  TextSpan(
-                    text: '  ${v['unit']}',
-                    style: theme.textTheme.titleMedium,
-                  ),
-                ],
-              ),
-            ),
-            if (v['progress'] != null) ...[
-              const SizedBox(height: 14),
-              LinearProgressIndicator(
-                value: (v['progress'] as num).toDouble(),
-                minHeight: 6,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '剩余 ${((v['progress'] as num) * 100).round()}% · 参考总量 ${formatUnits(ac['reference'] as int, p)} ${v['unit']}',
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-            if (ac['low'] != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                '不足提醒阈值 ${formatUnits(ac['low'] as int, p)} ${v['unit']}${v['low'] == true ? ' · 已低于阈值' : ''}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: v['low'] == true ? warningColor(context) : null,
                 ),
-              ),
-            ],
-            if (users.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                '${users.length > 1 ? '共享' : '关联'}：${users.map((r) => r['name']).join('、')}',
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-            if (!archived) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () =>
-                          resourceSheet(context, store, id, 'add', rule),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: Text(add),
-                    ),
+                TextSpan(
+                  text: '  ${v['unit']}',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: colors.muted,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () =>
-                          resourceSheet(context, store, id, 'consume', rule),
-                      icon: const Icon(Icons.remove, size: 18),
-                      label: Text(consume),
-                    ),
+                ),
+              ],
+            ),
+          ),
+          if (v['progress'] != null) ...[
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: (v['progress'] as num).toDouble(),
+              minHeight: 6,
+              color: v['low'] == true ? warningColor(context) : null,
+            ),
+          ],
+          for (final f in facts) ...[
+            const SizedBox(height: 6),
+            Text(f, style: theme.textTheme.bodySmall),
+          ],
+          if (!archived) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () =>
+                        resourceSheet(context, store, id, 'add', rule),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: Text(add),
                   ),
-                  PopupMenuButton<String>(
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () =>
+                        resourceSheet(context, store, id, 'consume', rule),
+                    icon: const Icon(Icons.remove, size: 18),
+                    label: Text(consume),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Material(
+                  color: colors.fill,
+                  borderRadius: BorderRadius.circular(12),
+                  child: PopupMenuButton<String>(
                     tooltip: '更多账户操作',
-                    icon: const Icon(Icons.more_horiz),
+                    icon: Icon(
+                      Icons.more_horiz_rounded,
+                      color: theme.colorScheme.primary,
+                    ),
                     onSelected: (value) => value == 'set'
                         ? resourceSheet(context, store, id, 'set', rule)
                         : forecastSheet(context, store, id),
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: 'set',
-                        child: ListTile(
-                          leading: Icon(Icons.tune),
-                          title: Text('修正当前余量'),
-                          subtitle: Text('追加差额流水，不改历史'),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'forecast',
-                        child: ListTile(
-                          leading: Icon(Icons.insights_outlined),
-                          title: Text('查看预测'),
-                          subtitle: Text('只读估算，不入账'),
-                        ),
-                      ),
+                    itemBuilder: (_) => [
+                      menuItem('set', '修正当前余量', Icons.tune),
+                      menuItem('forecast', '查看预测', Icons.insights_outlined),
                     ],
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ],
-        ),
-        SectionHeader('实际流水', note: '${entries.length} 条 · 点按查看或纠正'),
-        if (entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text('暂无流水。', style: theme.textTheme.bodySmall),
-          )
-        else
-          PagedItems(
-            key: ValueKey('ledger-$id'),
-            items: entries,
-            itemBuilder: (e) =>
-                ledgerRow(context, store, e, p, v['unit'] as String),
+        ],
+      );
+      return SpanPage(
+        title: ac['name'] as String,
+        maxWidth: 680,
+        actions: [
+          if (!archived)
+            IconButton(
+              tooltip: '账户设置',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => accountOptionsSheet(context, store, object(ac)),
+            ),
+        ],
+        slivers: [
+          boxes([
+            const SizedBox(height: 12),
+            hero,
+            SectionHeader('流水', note: '${entries.length}', large: false),
+            if (entries.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text('暂无流水。', style: theme.textTheme.bodySmall),
+              ),
+          ]),
+          SliverList.builder(
+            itemCount: entries.length,
+            itemBuilder: (context, i) => GroupedTile(
+              first: i == 0,
+              last: i == entries.length - 1,
+              onTap: () => entrySheet(
+                context,
+                store,
+                entries[i],
+                p,
+                v['unit'] as String,
+              ),
+              child: ledgerRow(context, store, entries[i], p),
+            ),
           ),
-      ];
-      return Scaffold(
-        appBar: AppBar(
-          title: Text(ac['name'] as String),
-          actions: [
-            if (!archived)
-              IconButton(
-                tooltip: '账户设置',
-                icon: const Icon(Icons.settings_outlined),
-                onPressed: () =>
-                    accountOptionsSheet(context, store, object(ac)),
-              ),
-            const SizedBox(width: 4),
-          ],
-        ),
-        body: ListView(
-          padding: pagePadding(context, top: 4),
-          children: [for (final c in children) Readable(child: c)],
-        ),
+          if (entries.isNotEmpty) boxes([const SectionFooter('点按一条流水可查看或纠正。')]),
+        ],
       );
     },
   );
@@ -1249,38 +1246,25 @@ String sourceLabel(String source) => switch (source) {
   _ => source,
 };
 
-Widget ledgerRow(
-  BuildContext context,
-  SpanStore store,
-  Json e,
-  int precision,
-  String unit,
-) {
+Widget ledgerRow(BuildContext context, SpanStore store, Json e, int precision) {
   final delta = e['delta'] as int;
   final corrected = e['corrected_by'] != null;
   final note = entryNote(e);
   final rule = e['rule'] == null ? null : store.state['rules'][e['rule']];
+  final muted = SpanColors.of(context).muted;
   return ListTile(
-    leading: Icon(
-      delta >= 0 ? Icons.south_west : Icons.north_east,
-      size: 20,
-      color: delta >= 0 ? successColor(context) : null,
-    ),
     title: Text(
       note.isNotEmpty ? note : sourceLabel(e['source'] as String),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: corrected
-          ? TextStyle(
-              decoration: TextDecoration.lineThrough,
-              color: SpanColors.of(context).muted,
-            )
+          ? TextStyle(decoration: TextDecoration.lineThrough, color: muted)
           : null,
     ),
     subtitle: Text(
       [
         friendlyDate(e['date'] as String, weekday: false),
-        sourceLabel(e['source'] as String),
+        if (note.isNotEmpty) sourceLabel(e['source'] as String),
         if (rule != null) rule['name'],
         if (corrected) '已纠正',
       ].join(' · '),
@@ -1290,17 +1274,16 @@ Widget ledgerRow(
     trailing: Text(
       '${delta > 0 ? '+' : ''}${formatUnits(delta, precision)}',
       style: TextStyle(
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: FontWeight.w600,
         fontFeatures: tabular,
         color: corrected
-            ? SpanColors.of(context).muted
+            ? muted
             : delta >= 0
             ? successColor(context)
             : null,
       ),
     ),
-    onTap: () => entrySheet(context, store, e, precision, unit),
   );
 }
 
@@ -1323,15 +1306,10 @@ Future<void> entrySheet(
           '${friendlyDate(e['date'] as String)} · ${sourceLabel(e['source'] as String)}',
       content: [
         Panel(
-          dividerIndent: 16,
           children: [
-            if (entryNote(e).isNotEmpty)
-              ListTile(title: const Text('备注'), subtitle: Text(entryNote(e))),
-            if (rule != null)
-              ListTile(
-                title: const Text('关联规则'),
-                subtitle: Text(rule['name'] as String),
-              ),
+            if (entryNote(e).isNotEmpty) ValueRow('备注', value: entryNote(e)),
+            if (rule != null) ValueRow('关联规则', value: rule['name'] as String),
+            if (e['origin'] != null) ValueRow('来源记录', value: '${e['origin']}'),
             if (e['corrected_by'] != null)
               const ListTile(
                 title: Text('已纠正'),
@@ -1342,11 +1320,11 @@ Future<void> entrySheet(
                 title: Text('系统反向流水'),
                 subtitle: Text('不能再次纠正；如需更改，请纠正对应的替代流水'),
               ),
-            if (e['origin'] != null)
-              ListTile(
-                title: const Text('来源记录'),
-                subtitle: Text('${e['origin']}'),
-              ),
+            if (entryNote(e).isEmpty &&
+                rule == null &&
+                e['origin'] == null &&
+                correctable)
+              const ListTile(title: Text('没有附加信息')),
           ],
         ),
       ],
@@ -1356,7 +1334,7 @@ Future<void> entrySheet(
           child: const Text('关闭'),
         ),
         if (correctable)
-          FilledButton.tonal(
+          FilledButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('纠正此流水'),
           ),
@@ -1432,56 +1410,60 @@ class _SheetFormState extends State<_SheetForm> {
   }
 
   @override
-  Widget build(BuildContext context) => SheetBody(
-    title: widget.title,
-    subtitle: widget.subtitle,
-    content: [
-      for (var i = 0; i < widget.fields.length; i++) ...[
-        if (i > 0) const SizedBox(height: 12),
-        TextField(
-          key: ValueKey('sheet-${widget.fields[i].$1}'),
-          controller: controllers[widget.fields[i].$1],
-          autofocus: i == 0,
-          keyboardType: i == 0 && widget.suffix != null
-              ? const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                )
-              : TextInputType.text,
-          decoration: InputDecoration(
-            labelText: widget.fields[i].$2,
-            suffixText: i == 0 ? widget.suffix : null,
-            errorText: errors[widget.fields[i].$1],
+  Widget build(BuildContext context) {
+    final panel = SpanColors.of(context).panel;
+    return SheetBody(
+      title: widget.title,
+      subtitle: widget.subtitle,
+      content: [
+        for (var i = 0; i < widget.fields.length; i++) ...[
+          if (i > 0) const SizedBox(height: 10),
+          TextField(
+            key: ValueKey('sheet-${widget.fields[i].$1}'),
+            controller: controllers[widget.fields[i].$1],
+            autofocus: i == 0,
+            keyboardType: i == 0 && widget.suffix != null
+                ? const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  )
+                : TextInputType.text,
+            style: i == 0 && widget.suffix != null
+                ? const TextStyle(fontSize: 20, fontFeatures: tabular)
+                : null,
+            decoration: InputDecoration(
+              labelText: widget.fields[i].$2,
+              fillColor: panel,
+              suffixText: i == 0 ? widget.suffix : null,
+              errorText: errors[widget.fields[i].$1],
+            ),
+            onChanged: (_) {
+              if (errors.isNotEmpty) setState(errors.clear);
+            },
+            onSubmitted: (_) => run(),
           ),
-          onChanged: (_) {
-            if (errors.isNotEmpty) setState(errors.clear);
-          },
-          onSubmitted: (_) => run(),
+        ],
+        if (widget.note != null) SectionFooter(widget.note!),
+      ],
+      actions: [
+        OutlinedButton(
+          onPressed: busy ? null : () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const ValueKey('sheet-submit'),
+          onPressed: busy ? null : run,
+          child: busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(widget.action),
         ),
       ],
-      if (widget.note != null) ...[
-        const SizedBox(height: 12),
-        Callout(widget.note!),
-      ],
-    ],
-    actions: [
-      OutlinedButton(
-        onPressed: busy ? null : () => Navigator.pop(context),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const ValueKey('sheet-submit'),
-        onPressed: busy ? null : run,
-        child: busy
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Text(widget.action),
-      ),
-    ],
-  );
+    );
+  }
 }
 
 Future<void> resourceSheet(
@@ -1507,7 +1489,7 @@ Future<void> resourceSheet(
     (_) => _SheetForm(
       title: title,
       subtitle: '${ac['name']} · 当前 ${v['formatted']} ${v['unit']}',
-      action: '确认$title',
+      action: action == 'set' ? '修正' : title,
       suffix: v['unit'] as String,
       note: action == 'set' ? '将追加一条差额流水使余量等于输入值；原有流水保留。' : null,
       fields: [
@@ -1560,7 +1542,7 @@ Future<void> correctSheet(
           formatUnits(entry['delta'] as int, precision),
           true,
         ),
-        ('reason', '纠正原因（写入审计历史）', '', true),
+        ('reason', '纠正原因', '', true),
       ],
       submit: (values) async {
         await store.mutate('correct_entry', {
@@ -1586,18 +1568,16 @@ Future<void> forecastSheet(
   await showSpanSheet<void>(
     context,
     (context) => SheetBody(
-      title: '未来资源预测',
+      title: '余量预测',
       subtitle: forecast['assumption'] as String,
       content: [
         if ((forecast['events'] as List).isEmpty)
           const Callout('没有固定的扣费或恢复计划，无法估算。完成后重新计时的周期不参与预测。')
         else
           Panel(
-            dividerIndent: 16,
             children: [
               for (final e in forecast['events'] as List)
                 ListTile(
-                  dense: true,
                   title: Text(
                     '${friendlyDate(e['planned'] as String)} · ${store.state['rules'][e['rule']]?['name'] ?? ''}',
                   ),
@@ -1613,10 +1593,9 @@ Future<void> forecastSheet(
                 ),
             ],
           ),
-        if (forecast['truncated'] == true) ...[
-          const SizedBox(height: 8),
-          Text('仅显示最近的计划。', style: Theme.of(context).textTheme.bodySmall),
-        ],
+        SectionFooter(
+          '${forecast['truncated'] == true ? '仅显示最近的计划。' : ''}预测只读，不会记账。',
+        ),
       ],
     ),
   );
@@ -1647,7 +1626,7 @@ Future<void> accountOptionsSheet(
         ),
         (
           'low',
-          '不足提醒阈值（可留空）',
+          '低于此值时提醒（可留空）',
           account['low'] == null ? '' : formatUnits(account['low'] as int, p),
           false,
         ),
@@ -1675,41 +1654,41 @@ Future<void> moveEntry(
 ) async {
   final baseRevision = store.revision;
   if (entry['group'] != null) {
-    notify(context, '成员随所属合并条目一起移动，请在合并详情中操作');
+    notify(context, '成员随所属合并条目一起移动，请在合并条目中操作');
     return;
   }
   final current = entry['project'] as String?;
-  final project = await showDialog<String>(
-    context: context,
-    builder: (context) => SimpleDialog(
-      title: const Text('移动到'),
-      children: [
-        for (final (id, name) in [
-          ('__root__', '未归类'),
-          for (final p in store.projects)
-            (p['id'] as String, p['name'] as String),
-        ])
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, id),
-            child: Row(
-              children: [
-                Icon(
-                  id == '__root__'
-                      ? Icons.inbox_outlined
-                      : Icons.folder_outlined,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text(name)),
-                if ((current ?? '__root__') == id)
-                  Icon(
-                    Icons.check,
-                    size: 20,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-              ],
-            ),
-          ),
+  final project = await showSpanSheet<String>(
+    context,
+    (context) => SheetBody(
+      title: '移动到',
+      subtitle: entry['name'] as String,
+      content: [
+        Panel(
+          dividerIndent: 52,
+          children: [
+            for (final (id, name) in [
+              ('__root__', '未归类'),
+              for (final p in store.projects)
+                (p['id'] as String, p['name'] as String),
+            ])
+              ValueRow(
+                name,
+                icon: id == '__root__'
+                    ? Icons.inbox_outlined
+                    : Icons.folder_outlined,
+                chevron: false,
+                trailing: (current ?? '__root__') == id
+                    ? Icon(
+                        Icons.check,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.primary,
+                      )
+                    : null,
+                onTap: () => Navigator.pop(context, id),
+              ),
+          ],
+        ),
       ],
     ),
   );

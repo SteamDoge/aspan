@@ -7,76 +7,101 @@ import 'data.dart';
 import 'design.dart';
 import 'details.dart';
 import 'editor.dart';
+import 'profile.dart';
 import 'widgets.dart';
 
-void openOverview(BuildContext context, SpanStore store) => Navigator.push(
-  context,
-  MaterialPageRoute<void>(
-    builder: (_) => EntryBrowser(store: store, title: '全部规则', overview: true),
-  ),
-);
+/// A place that lists rules: the smart home list, everything, the unfiled
+/// rules, one folder (small project) or one tag.
+@immutable
+class Folder {
+  final String kind;
+  final String? id;
+  const Folder(this.kind, [this.id]);
+  static const home = Folder('home'),
+      all = Folder('all'),
+      inbox = Folder('inbox');
+  const Folder.project(String this.id) : kind = 'project';
+  const Folder.tag(String this.id) : kind = 'tag';
 
-void openTag(BuildContext context, SpanStore store, Json tag) => Navigator.push(
-  context,
-  MaterialPageRoute<void>(
-    builder: (_) => EntryBrowser(
-      store: store,
-      title: '# ${tag['name']}',
-      tag: tag['id'] as String,
-    ),
-  ),
-);
+  String get key => id == null ? kind : '$kind-$id';
+  String title(SpanStore store) => switch (kind) {
+    'home' => '主页',
+    'all' => '全部规则',
+    'inbox' => '未归类',
+    'project' => store.state['projects'][id]?['name'] as String? ?? '文件夹',
+    _ => '#${store.state['tags'][id]?['name'] ?? ''}',
+  };
+  @override
+  bool operator ==(Object other) =>
+      other is Folder && other.kind == kind && other.id == id;
+  @override
+  int get hashCode => Object.hash(kind, id);
+}
 
-void openProject(BuildContext context, SpanStore store, Json project) =>
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => EntryBrowser(
-          store: store,
-          title: project['name'] as String,
-          project: project['id'] as String,
-        ),
-      ),
-    );
+/// Opens a folder as its own page (used outside the main shell).
+void openFolder(BuildContext context, SpanStore store, Folder folder) =>
+    push(context, FolderView(store: store, folder: folder, standalone: true));
+
+/// The home layout setting: `due` (every rule by due date), `project` or
+/// `tag` (grouped), or `project:<id>` / `tag:<id>` (one place only). Rust
+/// validates the value; a place missing from this snapshot shows everything.
+String homeLayout(SpanStore store) {
+  final value = store.setting('home', 'due');
+  final parts = value.split(':');
+  if (parts.length != 2) return value;
+  final places = store.state[parts[0] == 'project' ? 'projects' : 'tags'];
+  return places[parts[1]] == null ? 'due' : value;
+}
+
+/// Nearest next event first; rules without a date last; then by name.
+int byDue(SpanStore store, Json a, Json b) {
+  final pa = store.view(a['id'] as String)['planned'] as String?;
+  final pb = store.view(b['id'] as String)['planned'] as String?;
+  if (pa != pb) {
+    if (pa == null) return 1;
+    if (pb == null) return -1;
+    return pa.compareTo(pb);
+  }
+  return (a['name'] as String).compareTo(b['name'] as String);
+}
+
+/// Home rows offer quick completion while a period needs action or is close.
+const quickPhases = [...actionPhases, 'reminder'];
+
+void openTag(BuildContext context, SpanStore store, Json tag) =>
+    openFolder(context, store, Folder.tag(tag['id'] as String));
 
 Color tagColor(Json tag) =>
     Color(int.tryParse('FF${tag['color']}', radix: 16) ?? 0xFF2164C7);
 
-enum _Mode { browse, select, reorder }
+enum Mode { browse, select, reorder }
 
-/// File-manager style browser used for the project root, a folder, a tag
-/// and the overview. One list component, one set of controls.
-class EntryBrowser extends StatefulWidget {
+/// One list page for every folder: a large title, search and grouped rows.
+/// Pushed folders carry a toolbar with the count and the compose button; the
+/// home tab sits above the dock and keeps compose in its navigation bar.
+class FolderView extends StatefulWidget {
   final SpanStore store;
-  final String title;
-  final String? project, tag;
-  final bool overview, embedded;
-  final ValueChanged<bool>? onModeChanged;
-  const EntryBrowser({
+  final Folder folder;
+
+  /// Pushed as its own route, so it guards back presses itself.
+  final bool standalone;
+  const FolderView({
     super.key,
     required this.store,
-    this.title = '项目',
-    this.project,
-    this.tag,
-    this.overview = false,
-    this.embedded = false,
-    this.onModeChanged,
+    required this.folder,
+    this.standalone = false,
   });
   @override
-  State<EntryBrowser> createState() => _EntryBrowserState();
+  State<FolderView> createState() => _FolderViewState();
 }
 
-class _EntryBrowserState extends State<EntryBrowser> {
+class _FolderViewState extends State<FolderView> {
   final search = TextEditingController();
   String query = '';
-  _Mode mode = _Mode.browse;
+  Mode mode = Mode.browse;
   final Set<String> selected = {}, toggled = {};
   SpanStore get store => widget.store;
-  bool get root =>
-      widget.embedded &&
-      !widget.overview &&
-      widget.tag == null &&
-      widget.project == null;
+  Folder get folder => widget.folder;
 
   @override
   void dispose() {
@@ -84,12 +109,11 @@ class _EntryBrowserState extends State<EntryBrowser> {
     super.dispose();
   }
 
-  void setMode(_Mode next) {
+  void setMode(Mode next) {
     setState(() {
       mode = next;
       selected.clear();
     });
-    widget.onModeChanged?.call(next != _Mode.browse);
   }
 
   Future<void> startReorder() async {
@@ -100,41 +124,251 @@ class _EntryBrowserState extends State<EntryBrowser> {
         success: '已切换为手动排序，原手动顺序保留',
       );
     }
-    if (mounted) setMode(_Mode.reorder);
+    if (mounted) setMode(Mode.reorder);
   }
 
-  bool matches(Json r) =>
-      (widget.tag == null ||
-          List<String>.from(r['tags']).contains(widget.tag)) &&
-      ('${r['name']} ${r['notes']}').toLowerCase().contains(
-        query.trim().toLowerCase(),
+  bool matches(Json r) => ('${r['name']} ${r['notes']}').toLowerCase().contains(
+    query.trim().toLowerCase(),
+  );
+
+  bool inScope(Json r) => switch (folder.kind) {
+    'inbox' => r['project'] == null,
+    'project' => r['project'] == folder.id,
+    'tag' => List<String>.from(r['tags']).contains(folder.id),
+    _ => true,
+  };
+
+  void toggleSelect(String id) => setState(
+    () => selected.contains(id) ? selected.remove(id) : selected.add(id),
+  );
+
+  void menuFor(Json rule, Offset position) => ruleMenu(
+    context,
+    store,
+    rule,
+    position,
+    onSelect: folder.kind == 'home'
+        ? null
+        : () {
+            setMode(Mode.select);
+            toggleSelect(rule['id'] as String);
+          },
+  );
+
+  RuleRow ruleRow(
+    Json r, {
+    bool first = false,
+    bool last = false,
+    double indent = 0,
+    bool quick = false,
+    Key? key,
+  }) {
+    final id = r['id'] as String;
+    final selecting = mode == Mode.select;
+    return RuleRow(
+      key: key ?? ValueKey('rule-$id'),
+      store: store,
+      rule: r,
+      first: first,
+      last: last,
+      indent: indent,
+      selected: selecting && selected.contains(id),
+      onTap: () => selecting ? toggleSelect(id) : openRule(context, store, id),
+      onMenu: selecting ? null : (p) => menuFor(r, p),
+      leading: selecting && r['group'] == null
+          ? Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Icon(
+                selected.contains(id)
+                    ? Icons.check_circle
+                    : Icons.radio_button_unchecked,
+                color: selected.contains(id)
+                    ? Theme.of(context).colorScheme.primary
+                    : SpanColors.of(context).muted,
+              ),
+            )
+          : null,
+      trailing: !selecting && quick && store.view(id)['planned'] != null
+          ? CompleteButton(
+              onPressed: () => eventSheet(context, store, r, 'completed'),
+            )
+          : null,
+    );
+  }
+
+  /// Home: low resources and pinned rules first, then every rule of the
+  /// chosen place by its next due date, as one list or grouped by folder or
+  /// tag (see [homeLayout]).
+  List<Widget> homeSections() {
+    final layout = homeLayout(store);
+    final (kind, place) = switch (layout.split(':')) {
+      [final k, final id] => (k, id),
+      _ => (layout, null),
+    };
+    final rules = store.rules.where((r) {
+      if (place == null) return true;
+      return kind == 'project'
+          ? r['project'] == place
+          : List<String>.from(r['tags']).contains(place);
+    }).toList()..sort((a, b) => byDue(store, a, b));
+    final pinned = rules.where((r) => r['pinned'] == true).toList();
+    final rest = rules.where((r) => r['pinned'] != true).toList();
+    List<Widget> section(String title, List<Json> list) => [
+      SectionHeader(title, note: '${list.length}'),
+      ...groupedTiles(
+        list,
+        (r, f, l) => ruleRow(
+          r,
+          first: f,
+          last: l,
+          quick: quickPhases.contains(
+            store.view(r['id'] as String)['phase'] as String,
+          ),
+          key: ValueKey('home-$title-${r['id']}'),
+        ),
+      ),
+    ];
+    final groups = <(String, List<Json>)>[
+      if (place != null)
+        (Folder(kind, place).title(store), rest)
+      else if (kind == 'project') ...[
+        for (final p in store.projects)
+          (
+            p['name'] as String,
+            rest.where((r) => r['project'] == p['id']).toList(),
+          ),
+        ('未归类', rest.where((r) => r['project'] == null).toList()),
+      ] else if (kind == 'tag') ...[
+        for (final t in [
+          ...store.tags,
+        ]..sort((a, b) => (a['name'] as String).compareTo(b['name'])))
+          (
+            '#${t['name']}',
+            rest
+                .where((r) => List<String>.from(r['tags']).contains(t['id']))
+                .toList(),
+          ),
+        ('无标签', rest.where((r) => List.from(r['tags']).isEmpty).toList()),
+      ] else
+        ('全部规则', rest),
+    ];
+    final low = store.accounts
+        .where(
+          (a) =>
+              a['archived'] != true &&
+              store.accountView(a['id'] as String)['active'] == true &&
+              store.accountView(a['id'] as String)['low'] == true,
+        )
+        .toList();
+    return [
+      if (low.isNotEmpty) ...[
+        const SectionHeader('余量不足'),
+        ...groupedTiles(
+          low,
+          (a, f, l) => GroupedTile(
+            first: f,
+            last: l,
+            onTap: () => openAccount(context, store, a['id'] as String),
+            child: ValueRow(
+              a['name'] as String,
+              value:
+                  '${store.accountView(a['id'] as String)['formatted']} ${a['unit']['code']}',
+              valueColor: warningColor(context),
+              chevron: true,
+            ),
+          ),
+        ),
+      ],
+      if (pinned.isNotEmpty) ...section('置顶', pinned),
+      for (final (title, list) in groups)
+        if (list.isNotEmpty) ...section(title, list),
+      if (place != null && rules.isEmpty && store.rules.isNotEmpty)
+        EmptyState(
+          '这里还没有规则',
+          '主页当前只显示「${Folder(kind, place).title(store)}」，可在右上角菜单改回全部规则。',
+          icon: Icons.filter_list,
+        ),
+    ];
+  }
+
+  /// Home layout menu: one list by due date, grouped, or one place only.
+  Future<void> chooseHomeLayout(String value) async {
+    var next = value;
+    if (value == 'only-project' || value == 'only-tag') {
+      final kind = value == 'only-project' ? 'project' : 'tag';
+      final current = homeLayout(store);
+      final places = kind == 'project'
+          ? [
+              for (final p in store.projects)
+                (p['id'] as String, p['name'] as String),
+            ]
+          : [
+              for (final t in [
+                ...store.tags,
+              ]..sort((a, b) => (a['name'] as String).compareTo(b['name'])))
+                (t['id'] as String, '#${t['name']}'),
+            ];
+      final id = await showSpanSheet<String>(
+        context,
+        (context) => SheetBody(
+          title: kind == 'project' ? '主页只显示文件夹' : '主页只显示标签',
+          content: [
+            Panel(
+              dividerIndent: 52,
+              children: [
+                for (final (id, name) in places)
+                  ValueRow(
+                    name,
+                    key: ValueKey('home-place-$id'),
+                    icon: kind == 'project'
+                        ? Icons.folder_outlined
+                        : Icons.sell_outlined,
+                    chevron: false,
+                    trailing: current == '$kind:$id'
+                        ? Icon(
+                            Icons.check,
+                            size: 20,
+                            color: Theme.of(context).colorScheme.primary,
+                          )
+                        : null,
+                    onTap: () => Navigator.pop(context, id),
+                  ),
+              ],
+            ),
+          ],
+        ),
       );
+      if (id == null) return;
+      next = '$kind:$id';
+    }
+    if (!mounted || next == homeLayout(store)) return;
+    await perform(
+      context,
+      () => store.mutate('setting', {'key': 'home', 'value': next}),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: store,
     builder: (context, _) {
-      final searchingAll = root && query.trim().isNotEmpty;
-      final all = store.rules
-          .where(
-            (r) =>
-                widget.overview ||
-                widget.tag != null ||
-                searchingAll ||
-                r['project'] == widget.project,
-          )
-          .toList();
-      final top = store.ordered([
-        for (final r in all)
-          if (r['group'] == null && matches(r)) r,
-        for (final g in store.groups)
-          if (all.any((r) => r['group'] == g['id'] && matches(r))) g,
-      ]);
+      final colors = SpanColors.of(context);
+      final home = folder.kind == 'home';
+      final searching = query.trim().isNotEmpty;
       final manual = store.setting('sort', 'manual') == 'manual';
-      final reordering = mode == _Mode.reorder && manual;
-      final viewRevision = store.revision;
+      final reordering = mode == Mode.reorder && manual;
+      final scoped = store.rules.where(inScope).toList();
+      final top = home
+          ? <Json>[]
+          : store.ordered([
+              for (final r in scoped)
+                if (r['group'] == null && matches(r)) r,
+              for (final g in store.groups)
+                if (scoped.any((r) => r['group'] == g['id'] && matches(r))) g,
+            ]);
       final expandByDefault =
-          widget.overview || widget.tag != null || query.trim().isNotEmpty;
+          folder.kind == 'all' || folder.kind == 'tag' || searching;
+      final viewRevision = store.revision;
 
       void reorder(int oldIndex, int newIndex) {
         if (!reordering || oldIndex == newIndex) return;
@@ -147,285 +381,265 @@ class _EntryBrowserState extends State<EntryBrowser> {
         );
       }
 
-      void toggleSelect(String id) => setState(
-        () => selected.contains(id) ? selected.remove(id) : selected.add(id),
-      );
-
-      Widget member(Json r) => RuleTile(
-        store: store,
-        rule: r,
-        onTap: () => openRule(context, store, r['id'] as String),
-      );
-
-      Widget entry(Json item, int index) {
+      // Flatten entries (and unfolded members) into one grouped card.
+      final tiles = <Widget Function(bool first, bool last)>[];
+      final results = home && searching
+          ? (store.rules.where(matches).toList()
+              ..sort((a, b) => a['name'].toString().compareTo(b['name'])))
+          : <Json>[];
+      for (final r in results) {
+        tiles.add((f, l) => ruleRow(r, first: f, last: l));
+      }
+      for (final item in top) {
         final id = item['id'] as String;
-        Widget strip;
         if (!item.containsKey('accounts')) {
-          final selecting = mode == _Mode.select;
-          strip = RuleTile(
-            store: store,
-            rule: item,
-            dense: reordering,
-            selected: selecting && selected.contains(id),
-            onTap: () =>
-                selecting ? toggleSelect(id) : openRule(context, store, id),
-            onLongPress: mode == _Mode.browse
-                ? () {
-                    setMode(_Mode.select);
-                    toggleSelect(id);
-                  }
-                : null,
-            trailing: selecting
-                ? Padding(
-                    padding: const EdgeInsets.only(left: 4, right: 4),
-                    child: Icon(
-                      selected.contains(id)
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
-                      color: selected.contains(id)
-                          ? Theme.of(context).colorScheme.primary
-                          : SpanColors.of(context).muted,
-                    ),
-                  )
-                : null,
-          );
-        } else {
-          final members = store.ordered(
-            all.where((r) => r['group'] == id && matches(r)).toList(),
-          );
-          strip = GroupTile(
+          tiles.add((f, l) => ruleRow(item, first: f, last: l));
+          continue;
+        }
+        final members = store.ordered(
+          scoped.where((r) => r['group'] == id && matches(r)).toList(),
+        );
+        final expanded = expandByDefault ^ toggled.contains(id);
+        tiles.add(
+          (f, l) => GroupRow(
+            key: ValueKey('group-$id'),
             store: store,
             group: item,
             members: members,
-            dimmed: mode == _Mode.select,
-            expanded: !reordering && (expandByDefault ^ toggled.contains(id)),
+            first: f,
+            last: l,
+            expanded: expanded,
+            dimmed: mode == Mode.select,
             onTap: () {
-              if (mode == _Mode.browse) openGroup(context, store, id);
+              if (mode == Mode.browse) openGroup(context, store, id);
             },
-            onToggle: mode == _Mode.browse
+            onMenu: mode == Mode.browse
+                ? (p) => groupMenu(context, store, item, p)
+                : null,
+            onToggle: mode == Mode.browse
                 ? () => setState(
                     () => toggled.contains(id)
                         ? toggled.remove(id)
                         : toggled.add(id),
                   )
                 : null,
-            memberBuilder: member,
-          );
-        }
-        if (!reordering) return strip;
-        return Row(
-          children: [
-            Expanded(child: strip),
-            IconButton(
-              tooltip: '上移',
-              onPressed: index > 0 ? () => reorder(index, index - 1) : null,
-              icon: const Icon(Icons.arrow_upward, size: 20),
-            ),
-            IconButton(
-              tooltip: '下移',
-              onPressed: index + 1 < top.length
-                  ? () => reorder(index, index + 1)
-                  : null,
-              icon: const Icon(Icons.arrow_downward, size: 20),
-            ),
-            ReorderableDragStartListener(
-              index: index,
-              child: const Tooltip(
-                message: '拖动排序',
-                child: Padding(
-                  padding: EdgeInsets.all(10),
-                  child: Icon(Icons.drag_indicator),
-                ),
-              ),
-            ),
-          ],
+          ),
         );
+        if (expanded) {
+          for (final m in members) {
+            tiles.add((f, l) => ruleRow(m, first: false, last: l, indent: 38));
+          }
+        }
       }
 
-      final sortButton = SortButton(store: store);
-      final moreMenu = PopupMenuButton<String>(
-        key: const ValueKey('entries-menu'),
-        tooltip: '更多操作',
-        icon: const Icon(Icons.more_horiz),
-        onSelected: (value) async {
-          switch (value) {
-            case 'select':
-              setMode(_Mode.select);
-            case 'reorder':
-              await startReorder();
-            case 'project':
-              await createProject(context, store);
-            case 'rename':
-              await renameProject(context, store, widget.project!);
-          }
-        },
-        itemBuilder: (_) => [
-          const PopupMenuItem(
-            value: 'select',
-            child: ListTile(
-              leading: Icon(Icons.call_merge),
-              title: Text('选择并合并'),
-            ),
-          ),
-          PopupMenuItem(
-            value: 'reorder',
-            enabled: top.length > 1,
-            child: const ListTile(
-              leading: Icon(Icons.swap_vert),
-              title: Text('调整顺序'),
-            ),
-          ),
-          if (root)
-            const PopupMenuItem(
-              value: 'project',
-              child: ListTile(
-                leading: Icon(Icons.create_new_folder_outlined),
-                title: Text('新建小项目'),
-              ),
-            ),
-          if (widget.project != null)
-            const PopupMenuItem(
-              value: 'rename',
-              child: ListTile(
-                leading: Icon(Icons.edit_outlined),
-                title: Text('重命名小项目'),
-              ),
-            ),
-        ],
-      );
-
-      final searchField = Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 4),
-        child: TextField(
-          key: const ValueKey('entry-search'),
-          controller: search,
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            hintText: root ? '搜索全部规则' : '在${widget.title}中搜索',
-            prefixIcon: const Icon(Icons.search, size: 20),
-            suffixIcon: query.isEmpty
-                ? null
-                : IconButton(
-                    tooltip: '清除搜索',
-                    onPressed: () => setState(() {
-                      search.clear();
-                      query = '';
-                    }),
-                    icon: const Icon(Icons.close, size: 18),
-                  ),
-            contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          ),
-          onChanged: (v) => setState(() => query = v),
-        ),
-      );
-
-      final listTitle = searchingAll
-          ? '搜索结果'
-          : root
-          ? '未归类'
-          : widget.overview
-          ? '全部条目'
-          : '条目';
-      final header = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (root)
-            Padding(
-              key: const ValueKey('page-projects'),
-              padding: const EdgeInsets.only(top: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Semantics(
-                      header: true,
-                      child: Text(
-                        '项目',
-                        style: Theme.of(context).textTheme.headlineMedium,
-                      ),
-                    ),
-                  ),
-                  moreMenu,
-                ],
-              ),
-            ),
-          searchField,
-          if (root && !searchingAll) ...[
-            const SizedBox(height: 12),
-            FolderGrid(store: store),
-            if (store.tags.isNotEmpty) ...[
-              const SectionHeader('标签'),
-              SizedBox(
-                height: 40,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    for (final t in store.tags)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ActionChip(
-                          avatar: CircleAvatar(
-                            radius: 5,
-                            backgroundColor: tagColor(t),
-                          ),
-                          label: Text(t['name'] as String),
-                          onPressed: () => openTag(context, store, t),
-                        ),
-                      ),
-                  ],
+      final count = home ? store.rules.length : top.length;
+      final emptyHint = searching
+          ? const EmptyState(
+              '没有找到',
+              '按名称和备注搜索，换个关键词试试。',
+              icon: Icons.search_off,
+            )
+          : switch (folder.kind) {
+              'home' when store.rules.isEmpty => EmptyState(
+                '还没有规则',
+                '订阅、证件、次卡、保养……\n把需要按时处理的事记在这里。',
+                icon: Icons.event_note_outlined,
+                action: FilledButton(
+                  onPressed: () => openCreator(context, store),
+                  child: const Text('新建规则'),
                 ),
               ),
-            ],
-          ],
-          SectionHeader(
-            listTitle,
-            note: '${top.length}',
-            trailing: top.length > 1 ? sortButton : null,
-          ),
-          if (top.isEmpty)
-            query.trim().isNotEmpty
-                ? EmptyState(
-                    '没有找到匹配的规则',
-                    '按名称和备注搜索，换个关键词试试。',
-                    icon: Icons.search_off,
-                  )
-                : EmptyState(
-                    root
-                        ? (store.rules.isEmpty ? '还没有规则' : '未归类条目已全部整理')
-                        : widget.project != null
-                        ? '这个小项目还是空的'
-                        : '这里还没有规则',
-                    root && store.rules.isNotEmpty
-                        ? '其余规则都在小项目中。'
-                        : widget.project != null
-                        ? '在这里新建规则，或在规则详情中“移动到小项目”。'
-                        : '从空白或模板创建一条规则。',
-                    icon: root && store.rules.isNotEmpty
-                        ? Icons.check_circle_outline
-                        : Icons.inbox_outlined,
-                  ),
-        ],
-      );
+              'home' => const SizedBox.shrink(),
+              'project' => const EmptyState(
+                '文件夹是空的',
+                '在这里新建规则，或在规则菜单中选择“移动到”。',
+                icon: Icons.folder_open_outlined,
+              ),
+              'inbox' => const EmptyState(
+                '没有未归类的规则',
+                '其余规则都已放进文件夹。',
+                icon: Icons.inbox_outlined,
+              ),
+              _ => const EmptyState(
+                '这里还没有规则',
+                '新建一条规则开始。',
+                icon: Icons.event_note_outlined,
+              ),
+            };
 
-      final list = ReorderableListView.builder(
-        padding: pagePadding(context, fab: mode == _Mode.browse),
-        header: Readable(maxWidth: 1000, child: header),
-        itemCount: top.length,
-        buildDefaultDragHandles: false,
-        onReorderItem: reorder,
-        itemBuilder: (context, index) => Readable(
-          key: ValueKey(top[index]['id']),
-          maxWidth: 1000,
-          child: entry(top[index], index),
-        ),
+      final layout = homeLayout(store);
+      String? only(String kind) => layout.startsWith('$kind:')
+          ? Folder(kind, layout.substring(kind.length + 1)).title(store)
+          : null;
+      final menu = home
+          ? PopupMenuButton<String>(
+              key: const ValueKey('home-menu'),
+              tooltip: '主页显示',
+              icon: const Icon(Icons.more_horiz_rounded),
+              onSelected: chooseHomeLayout,
+              itemBuilder: (_) => [
+                for (final (value, label) in [
+                  ('due', '全部规则，按到期时间'),
+                  ('project', '按文件夹分组'),
+                  ('tag', '按标签分组'),
+                ])
+                  CheckedPopupMenuItem(
+                    value: value,
+                    checked: layout == value,
+                    child: Text(label),
+                  ),
+                const PopupMenuDivider(),
+                CheckedPopupMenuItem(
+                  value: 'only-project',
+                  checked: only('project') != null,
+                  enabled: store.projects.isNotEmpty,
+                  child: Text(
+                    only('project') == null
+                        ? '只看一个文件夹…'
+                        : '只看：${only('project')}',
+                  ),
+                ),
+                CheckedPopupMenuItem(
+                  value: 'only-tag',
+                  checked: only('tag') != null,
+                  enabled: store.tags.isNotEmpty,
+                  child: Text(
+                    only('tag') == null ? '只看一个标签…' : '只看：${only('tag')}',
+                  ),
+                ),
+              ],
+            )
+          : PopupMenuButton<String>(
+              key: const ValueKey('entries-menu'),
+              tooltip: '更多',
+              icon: const Icon(Icons.more_horiz_rounded),
+              onSelected: (value) async {
+                final sort = store.setting('sort', 'manual');
+                final descending = store.setting('descending', 'false');
+                void set(String key, String value) => perform(
+                  context,
+                  () => store.mutate('setting', {'key': key, 'value': value}),
+                );
+                switch (value) {
+                  case 'select':
+                    setMode(Mode.select);
+                  case 'reorder':
+                    await startReorder();
+                  case 'rename':
+                    await renameProject(context, store, folder.id!);
+                  case 'tag':
+                    await tagSheet(
+                      context,
+                      store,
+                      object(store.state['tags'][folder.id]),
+                    );
+                  case 'direction':
+                    set('descending', descending == 'true' ? 'false' : 'true');
+                  default:
+                    if (value != sort) set('sort', value);
+                }
+              },
+              itemBuilder: (_) {
+                final sort = store.setting('sort', 'manual');
+                final descending =
+                    store.setting('descending', 'false') == 'true';
+                return [
+                  menuItem(
+                    'select',
+                    '选择',
+                    Icons.check_circle_outline,
+                    enabled: top.any((e) => !e.containsKey('accounts')),
+                  ),
+                  menuItem(
+                    'reorder',
+                    '调整顺序',
+                    Icons.swap_vert,
+                    enabled: top.length > 1,
+                  ),
+                  const PopupMenuDivider(),
+                  for (final key in [
+                    'manual',
+                    'reminder',
+                    'event',
+                    'remaining',
+                  ])
+                    CheckedPopupMenuItem(
+                      value: key,
+                      checked: sort == key,
+                      child: Text(sortLabel(key)),
+                    ),
+                  if (sort != 'manual')
+                    menuItem(
+                      'direction',
+                      descending ? '改为由近到远' : '改为由远到近',
+                      descending ? Icons.north : Icons.south,
+                    ),
+                  if (folder.kind == 'project' || folder.kind == 'tag')
+                    const PopupMenuDivider(),
+                  if (folder.kind == 'project')
+                    menuItem(
+                      'rename',
+                      '重命名文件夹',
+                      Icons.drive_file_rename_outline,
+                    ),
+                  if (folder.kind == 'tag')
+                    menuItem('tag', '编辑标签', Icons.sell_outlined),
+                ];
+              },
+            );
+
+      final attention = store.rules
+          .where(
+            (r) => actionPhases.contains(
+              store.view(r['id'] as String)['phase'] as String,
+            ),
+          )
+          .length;
+      final subtitle = home
+          ? Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: friendlyDate(store.snapshot['today'] as String?),
+                  ),
+                  if (store.rules.isNotEmpty) ...[
+                    const TextSpan(text: ' · '),
+                    TextSpan(
+                      text: attention == 0 ? '暂无需要处理的事项' : '$attention 项需要处理',
+                      style: attention == 0
+                          ? null
+                          : TextStyle(
+                              color: warningColor(context),
+                              fontWeight: FontWeight.w600,
+                            ),
+                    ),
+                  ],
+                ],
+              ),
+            )
+          : null;
+
+      void compose() => openCreator(
+        context,
+        store,
+        project: folder.kind == 'project' ? folder.id : null,
       );
-      final bar = switch (mode) {
-        _Mode.browse => null,
-        _Mode.select => ModeBar(
+      final toolbar = switch (mode) {
+        Mode.browse when !widget.standalone => null,
+        Mode.browse => SpanToolbar(
+          center: Text(home ? '${store.rules.length} 条规则' : '$count 项'),
+        ),
+        Mode.select => SpanToolbar(
           key: const ValueKey('select-bar'),
-          title: selected.isEmpty ? '选择要合并的规则' : '已选 ${selected.length} 条',
-          subtitle: '至少选两条独立规则',
-          onClose: () => setMode(_Mode.browse),
-          action: FilledButton.icon(
+          leading: TextButton(
+            onPressed: () => setMode(Mode.browse),
+            child: const Text('取消'),
+          ),
+          center: Text(
+            selected.isEmpty ? '选择要合并的规则' : '已选 ${selected.length} 条',
+          ),
+          trailing: TextButton(
+            key: const ValueKey('merge-selected'),
             onPressed: selected.length < 2
                 ? null
                 : () => perform(context, () async {
@@ -434,304 +648,359 @@ class _EntryBrowserState extends State<EntryBrowser> {
                       store,
                       selected.toList(),
                     );
-                    if (merged && mounted) setMode(_Mode.browse);
+                    if (merged && mounted) setMode(Mode.browse);
                   }),
-            icon: const Icon(Icons.call_merge, size: 18),
-            label: Text('合并 ${selected.length}'),
+            child: Text(
+              selected.length < 2 ? '合并' : '合并 ${selected.length}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ),
-        _Mode.reorder => ModeBar(
+        Mode.reorder => SpanToolbar(
           key: const ValueKey('reorder-bar'),
-          title: '调整顺序',
-          subtitle: '拖动手柄或用箭头移动；切换自动排序时保留',
-          action: FilledButton(
-            onPressed: () => setMode(_Mode.browse),
-            child: const Text('完成'),
+          center: const Text('拖动或用箭头调整顺序'),
+          trailing: TextButton(
+            key: const ValueKey('reorder-done'),
+            onPressed: () => setMode(Mode.browse),
+            child: const Text(
+              '完成',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ),
       };
-      final body = PopScope(
-        canPop: mode == _Mode.browse,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) setMode(_Mode.browse);
-        },
-        child: Column(
-          children: [
-            ?bar,
-            Expanded(child: list),
-          ],
-        ),
-      );
-      if (widget.embedded) return body;
-      return Scaffold(
-        appBar: AppBar(title: Text(widget.title), actions: [moreMenu]),
-        body: body,
-        floatingActionButton: mode != _Mode.browse
-            ? null
-            : FloatingActionButton.extended(
-                onPressed: () =>
-                    openCreator(context, store, project: widget.project),
-                icon: const Icon(Icons.add),
-                label: const Text('新建规则'),
+
+      final Widget list;
+      if (reordering) {
+        list = SliverReorderableList(
+          itemCount: top.length,
+          onReorderItem: reorder,
+          proxyDecorator: (child, _, _) => Material(
+            elevation: 8,
+            color: Colors.transparent,
+            shadowColor: Colors.black.withValues(alpha: .3),
+            borderRadius: BorderRadius.circular(12),
+            child: child,
+          ),
+          itemBuilder: (context, index) {
+            final item = top[index];
+            final handle = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: '上移',
+                  onPressed: index > 0 ? () => reorder(index, index - 1) : null,
+                  icon: const Icon(Icons.arrow_upward, size: 18),
+                ),
+                IconButton(
+                  tooltip: '下移',
+                  onPressed: index + 1 < top.length
+                      ? () => reorder(index, index + 1)
+                      : null,
+                  icon: const Icon(Icons.arrow_downward, size: 18),
+                ),
+                ReorderableDragStartListener(
+                  index: index,
+                  child: Tooltip(
+                    message: '拖动排序',
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 10, 14, 10),
+                      child: Icon(Icons.drag_handle, color: colors.muted),
+                    ),
+                  ),
+                ),
+              ],
+            );
+            final first = index == 0, last = index == top.length - 1;
+            return KeyedSubtree(
+              key: ValueKey(item['id']),
+              child: item.containsKey('accounts')
+                  ? GroupRow(
+                      store: store,
+                      group: item,
+                      members: scoped
+                          .where((r) => r['group'] == item['id'])
+                          .toList(),
+                      first: first,
+                      last: last,
+                      expanded: false,
+                      onTap: () {},
+                      trailing: handle,
+                    )
+                  : RuleRow(
+                      store: store,
+                      rule: item,
+                      first: first,
+                      last: last,
+                      onTap: () {},
+                      trailing: handle,
+                    ),
+            );
+          },
+        );
+      } else {
+        list = SliverList.builder(
+          itemCount: tiles.length,
+          itemBuilder: (context, i) => tiles[i](i == 0, i == tiles.length - 1),
+        );
+      }
+
+      final homeChildren = home && !searching ? homeSections() : <Widget>[];
+      final empty = home
+          ? (searching ? results.isEmpty : store.rules.isEmpty)
+          : top.isEmpty;
+      final page = SpanPage(
+        title: folder.title(store),
+        titleKey: ValueKey('page-${folder.kind}'),
+        subtitle: subtitle,
+        leading: mode != Mode.browse ? const SizedBox.shrink() : null,
+        floatingActionButton: mode == Mode.browse
+            ? AddButton(key: const ValueKey('create-rule'), onPressed: compose)
+            : null,
+        actions: [
+          if (mode == Mode.select)
+            TextButton(
+              onPressed: () => setMode(Mode.browse),
+              child: const Text(
+                '完成',
+                style: TextStyle(fontWeight: FontWeight.w700),
               ),
+            )
+          else if (mode == Mode.browse)
+            menu,
+        ],
+        onRefresh: () => perform(context, store.refresh),
+        toolbar: toolbar,
+        slivers: [
+          boxes([
+            if (mode == Mode.browse)
+              SearchField(
+                key: const ValueKey('entry-search'),
+                controller: search,
+                hint: home ? '搜索全部规则' : '搜索',
+                onChanged: (v) => setState(() => query = v),
+              ),
+            if (!home && !reordering && top.isNotEmpty)
+              const SizedBox(height: 12),
+            if (home && searching && results.isNotEmpty)
+              SectionHeader('搜索结果', note: '${results.length}'),
+            if (reordering) const SizedBox(height: 12),
+            ...homeChildren,
+            if (empty) emptyHint,
+          ]),
+          list,
+        ],
+      );
+      if (!widget.standalone) return page;
+      return PopScope(
+        canPop: mode == Mode.browse,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) setMode(Mode.browse);
+        },
+        child: page,
       );
     },
   );
 }
 
-/// Contextual bar for a temporary mode; replaces scattered toggles.
-class ModeBar extends StatelessWidget {
-  final String title, subtitle;
-  final VoidCallback? onClose;
-  final Widget action;
-  const ModeBar({
-    super.key,
-    required this.title,
-    required this.subtitle,
-    required this.action,
-    this.onClose,
-  });
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: SpanColors.of(context).soft,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(onClose == null ? 16 : 4, 8, 12, 8),
-        child: Row(
-          children: [
-            if (onClose != null)
-              IconButton(
-                tooltip: '退出',
-                onPressed: onClose,
-                icon: const Icon(Icons.close),
-              ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(title, style: theme.textTheme.titleMedium),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            action,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class SortButton extends StatelessWidget {
-  final SpanStore store;
-  const SortButton({super.key, required this.store});
-  @override
-  Widget build(BuildContext context) {
-    final sort = store.setting('sort', 'manual');
-    final descending = store.setting('descending', 'false') == 'true';
-    void set(String key, String value) => perform(
-      context,
-      () => store.mutate('setting', {'key': key, 'value': value}),
-    );
-    return PopupMenuButton<String>(
-      key: const ValueKey('sort-menu'),
-      tooltip: '排序方式',
-      onSelected: (v) => v == 'direction'
-          ? set('descending', descending ? 'false' : 'true')
-          : set('sort', v),
-      itemBuilder: (_) => [
-        for (final key in ['manual', 'reminder', 'event', 'remaining'])
-          CheckedPopupMenuItem(
-            value: key,
-            checked: sort == key,
-            child: Text(sortLabel(key, long: true)),
-          ),
-        if (sort != 'manual') ...[
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            value: 'direction',
-            child: ListTile(
-              leading: Icon(descending ? Icons.north : Icons.south),
-              title: Text(descending ? '改为由近到远' : '改为由远到近'),
-            ),
-          ),
-        ],
-      ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              sort == 'manual'
-                  ? Icons.sort
-                  : descending
-                  ? Icons.south
-                  : Icons.north,
-              size: 16,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              sortLabel(sort),
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-String sortLabel(String value, {bool long = false}) => switch (value) {
-  'manual' => long ? '手动排序' : '手动',
-  'reminder' => long ? '下一次提醒时间' : '下一提醒',
-  'event' => long ? '下一次事件时间' : '下一事件',
-  'remaining' => '剩余有效期',
+String sortLabel(String value) => switch (value) {
+  'manual' => '手动排序',
+  'reminder' => '按下一次提醒',
+  'event' => '按下一次事件',
+  'remaining' => '按剩余有效期',
   _ => value,
 };
 
-/// Folders are the primary organizer, so they get a distinct, scannable grid.
-class FolderGrid extends StatelessWidget {
+/// The 项目 tab: overview, unfiled rules, folders and tags. Each opens its
+/// list as a page above the dock.
+class ProjectsPage extends StatelessWidget {
   final SpanStore store;
-  const FolderGrid({super.key, required this.store});
+  const ProjectsPage({super.key, required this.store});
   @override
-  Widget build(BuildContext context) {
-    final counts = <String?, int>{};
-    for (final r in store.rules) {
-      counts[r['project'] as String?] =
-          (counts[r['project'] as String?] ?? 0) + 1;
-    }
-    final tiles = <Widget>[
-      FolderTile(
-        key: const ValueKey('folder-overview'),
-        icon: Icons.view_agenda_outlined,
-        name: '全部规则',
-        detail: '${store.rules.length} 条 · 含合并成员',
-        onTap: () => openOverview(context, store),
-      ),
-      for (final p in store.projects)
-        FolderTile(
-          icon: Icons.folder_rounded,
-          name: p['name'] as String,
-          detail: '${counts[p['id']] ?? 0} 条规则',
-          onTap: () => openProject(context, store, p),
-          onLongPress: () => renameProject(context, store, p['id'] as String),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: store,
+    builder: (context, _) {
+      final theme = Theme.of(context);
+      final counts = <String?, int>{};
+      for (final r in store.rules) {
+        counts[r['project'] as String?] =
+            (counts[r['project'] as String?] ?? 0) + 1;
+      }
+      void open(Folder folder) => openFolder(context, store, folder);
+      Widget row(
+        Folder folder,
+        IconData icon,
+        String name,
+        int count, {
+        bool first = false,
+        bool last = false,
+        void Function(Offset)? onMenu,
+      }) => GroupedTile(
+        key: ValueKey('folder-${folder.key}'),
+        first: first,
+        last: last,
+        indent: 52,
+        onTap: () => open(folder),
+        onMenu: onMenu,
+        child: ValueRow(name, icon: icon, value: '$count', chevron: true),
+      );
+      return SpanPage(
+        title: '项目',
+        titleKey: const ValueKey('page-projects'),
+        floatingActionButton: AddButton(
+          key: const ValueKey('create-rule'),
+          onPressed: () => openCreator(context, store),
         ),
-      FolderTile(
-        key: const ValueKey('folder-create'),
-        icon: Icons.create_new_folder_outlined,
-        name: '新建小项目',
-        detail: '像文件夹一样归类',
-        outlined: true,
-        onTap: () => createProject(context, store),
-      ),
-    ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 760
-            ? 4
-            : constraints.maxWidth >= 480
-            ? 3
-            : 2;
-        const gap = 8.0;
-        final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
-          children: [for (final t in tiles) SizedBox(width: width, child: t)],
-        );
-      },
-    );
-  }
+        onRefresh: () => perform(context, store.refresh),
+        slivers: [
+          boxes([
+            const SizedBox(height: 8),
+            row(
+              Folder.all,
+              Icons.format_list_bulleted,
+              '全部规则',
+              store.rules.length,
+              first: true,
+            ),
+            row(
+              Folder.inbox,
+              Icons.inbox_outlined,
+              '未归类',
+              counts[null] ?? 0,
+              last: true,
+            ),
+            const SectionHeader('文件夹', large: false),
+            for (final p in store.projects)
+              row(
+                Folder.project(p['id'] as String),
+                Icons.folder_outlined,
+                p['name'] as String,
+                counts[p['id']] ?? 0,
+                first: p == store.projects.first,
+                onMenu: (position) async {
+                  final action = await showContextMenu<String>(
+                    context,
+                    position,
+                    title: p['name'] as String,
+                    sections: const [
+                      [
+                        MenuAction(
+                          'rename',
+                          '重命名',
+                          Icons.drive_file_rename_outline,
+                        ),
+                      ],
+                    ],
+                  );
+                  if (action == 'rename' && context.mounted) {
+                    await renameProject(context, store, p['id'] as String);
+                  }
+                },
+              ),
+            GroupedTile(
+              key: const ValueKey('folder-create'),
+              first: store.projects.isEmpty,
+              last: true,
+              indent: 52,
+              onTap: () => createProject(context, store),
+              child: ValueRow(
+                '新建文件夹',
+                icon: Icons.create_new_folder_outlined,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            if (store.tags.isNotEmpty) ...[
+              const SectionHeader('标签', large: false),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final t in store.tags)
+                      _TagPill(
+                        key: ValueKey('tag-${t['id']}'),
+                        tag: t,
+                        onTap: () => openTag(context, store, t),
+                        onLongPress: () => tagSheet(context, store, t),
+                      ),
+                  ],
+                ),
+              ),
+              const SectionFooter('点按查看相关规则，长按编辑标签。'),
+            ],
+          ]),
+        ],
+      );
+    },
+  );
 }
 
-class FolderTile extends StatelessWidget {
-  final IconData icon;
-  final String name, detail;
-  final VoidCallback onTap;
-  final VoidCallback? onLongPress;
-  final bool outlined;
-  const FolderTile({
+class _TagPill extends StatelessWidget {
+  final Json tag;
+  final VoidCallback onTap, onLongPress;
+  const _TagPill({
     super.key,
-    required this.icon,
-    required this.name,
-    required this.detail,
+    required this.tag,
     required this.onTap,
-    this.onLongPress,
-    this.outlined = false,
+    required this.onLongPress,
   });
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = SpanColors.of(context);
-    return MergeSemantics(
-      child: Material(
-        color: outlined ? Colors.transparent : colors.panel,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: colors.line),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  icon,
-                  size: 26,
-                  color: outlined ? colors.muted : theme.colorScheme.primary,
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    child: Material(
+      color: SpanColors.of(context).panel,
+      shape: const StadiumBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 7, 14, 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: tagColor(tag),
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                tag['name'] as String,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
-                Text(
-                  detail,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
-Future<void> createProject(BuildContext context, SpanStore store) =>
-    perform(context, () async {
-      final name = await askText(context, '新建小项目', action: '创建');
-      if (name != null) await store.mutate('save_project', {'name': name});
-    }, success: '已创建小项目');
+/// Asks first: a cancelled dialog writes nothing and reports nothing.
+Future<void> createProject(BuildContext context, SpanStore store) async {
+  final name = await askText(context, '新建文件夹', action: '创建');
+  if (name == null || !context.mounted) return;
+  await perform(
+    context,
+    () => store.mutate('save_project', {'name': name}),
+    success: '已创建文件夹',
+  );
+}
 
 Future<void> renameProject(BuildContext context, SpanStore store, String id) =>
     perform(context, () async {
       final baseRevision = store.revision;
       final name = await askText(
         context,
-        '重命名小项目',
+        '重命名文件夹',
         initial: store.state['projects'][id]['name'] as String,
         action: '保存',
       );
@@ -782,26 +1051,27 @@ Future<bool> mergeDialog(
             (b) => b['conflict'] == true && !choices.containsKey(b['unit_key']),
           );
           return AlertDialog(
-            title: Text('合并 ${ids.length} 条规则'),
+            title: Text('合并 ${ids.length} 条规则', textAlign: TextAlign.center),
             content: SingleChildScrollView(
               child: SizedBox(
-                width: 520,
+                width: 480,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Callout(
-                      '各规则的周期、提醒、标签与历史保持独立；相同单位的资源共用一个账户，余额只采用一份，不相加。',
+                    Text(
+                      '各规则的周期、提醒和历史保持独立；单位相同的资源共用一个账户，余额只保留一份，不相加。',
+                      style: theme.textTheme.bodySmall,
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     TextField(
                       controller: name,
-                      decoration: const InputDecoration(labelText: '合并条目名称'),
+                      decoration: const InputDecoration(hintText: '合并后的名称'),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
                       initialValue: project ?? '',
-                      decoration: const InputDecoration(labelText: '合并后归属'),
+                      decoration: const InputDecoration(labelText: '放在'),
                       items: [
                         const DropdownMenuItem(value: '', child: Text('未归类')),
                         for (final p in store.projects)
@@ -819,9 +1089,9 @@ Future<bool> mergeDialog(
                       const SizedBox(height: 16),
                       Text(
                         bucket['conflict'] == true
-                            ? '余额不同 · 请选择保留哪一份'
+                            ? '余额不同，请选择保留哪一份'
                             : (bucket['accounts'] as List).length > 1
-                            ? '余额相同 · 只保留一份，不相加'
+                            ? '余额相同，只保留一份'
                             : '共享资源账户',
                         style: theme.textTheme.titleSmall?.copyWith(
                           color: bucket['conflict'] == true
@@ -866,7 +1136,7 @@ Future<bool> mergeDialog(
                         child: CheckboxListTile(
                           contentPadding: EdgeInsets.zero,
                           value: approved,
-                          title: Text('确认所有成员移动到「${projectName(project)}」'),
+                          title: Text('把所有成员移到「${projectName(project)}」'),
                           subtitle: const Text('成员目前位于不同位置'),
                           onChanged: (v) => setState(() => approved = v!),
                         ),
