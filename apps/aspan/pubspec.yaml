@@ -1,7 +1,7 @@
 name: aspan
 description: Offline time and resource lifecycle manager.
 publish_to: none
-version: 0.0.5-rc.1+9
+version: 0.0.6-rc.1+10
 environment:
   sdk: ^3.13.5
   flutter: ">=3.47.7"
