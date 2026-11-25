@@ -882,6 +882,23 @@ fn manual_replay_across_midnight_and_noop_settings_preserve_revision() {
 }
 
 #[test]
+fn language_setting_accepts_only_supported_preferences() {
+    let mut s = State::default();
+    for value in ["zh-Hans", "en", "zh-Hant", "system"] {
+        run(&mut s, "setting", json!({"key":"language","value":value}));
+        assert_eq!(s.settings["language"], value);
+    }
+    for value in ["", "zh", "zh-CN", "EN", "fr"] {
+        assert!(
+            s.apply("setting", json!({"key":"language","value":value}), now())
+                .is_err(),
+            "{value}"
+        );
+    }
+    assert_eq!(s.settings["language"], "system");
+}
+
+#[test]
 fn home_setting_accepts_only_known_layouts_and_existing_places() {
     let mut s = State::default();
     let pid = run(&mut s, "save_project", json!({"name":"家庭"}));

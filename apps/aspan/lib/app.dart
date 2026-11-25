@@ -22,12 +22,22 @@ class ASpanApp extends StatefulWidget {
 
 class _ASpanAppState extends State<ASpanApp> with WidgetsBindingObserver {
   Timer? timer;
-  late final ValueNotifier<(String, String)> appearance;
-  (String, String) get currentAppearance => (
+  late final ValueNotifier<(String, String, String)> appearance;
+  AppLanguage get language =>
+      AppLanguage.parse(widget.store.setting('language', 'system'));
+  (String, String, String) get currentAppearance => (
     widget.store.setting('theme', 'system'),
     widget.store.setting('palette', 'lucent'),
+    widget.store.setting('language', 'system'),
   );
-  void appearanceChanged() => appearance.value = currentAppearance;
+
+  /// Settings change through the store, including a restored backup; the
+  /// language is applied here so every mounted page follows it.
+  void appearanceChanged() {
+    applyLanguage(language);
+    appearance.value = currentAppearance;
+  }
+
   void startTimer() {
     timer?.cancel();
     timer = Timer.periodic(
@@ -44,6 +54,7 @@ class _ASpanAppState extends State<ASpanApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    initLanguage(language);
     appearance = ValueNotifier(currentAppearance);
     widget.store.addListener(appearanceChanged);
     startTimer();
@@ -57,6 +68,12 @@ class _ASpanAppState extends State<ASpanApp> with WidgetsBindingObserver {
     } else {
       timer?.cancel();
     }
+  }
+
+  /// "Follow system" tracks device language changes while the app runs.
+  @override
+  void didChangeLocales(List<Locale>? locales) {
+    if (language == AppLanguage.system) applyLanguage(language);
   }
 
   @override
@@ -78,8 +95,8 @@ class _ASpanAppState extends State<ASpanApp> with WidgetsBindingObserver {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'ASpan',
-        locale: const Locale('zh', 'CN'),
-        supportedLocales: const [Locale('zh', 'CN')],
+        locale: uiLanguage.locale,
+        supportedLocales: supportedUiLocales,
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
         theme: spanTheme(Brightness.light, palette: palette),
         darkTheme: spanTheme(Brightness.dark, palette: palette),
@@ -234,7 +251,9 @@ class RefreshBanner extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    '数据未刷新：${errorMessage(store.lastRefreshError!)}',
+                    tr('数据未刷新：{error}', {
+                      'error': errorMessage(store.lastRefreshError!),
+                    }),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(color: scheme.onErrorContainer),
@@ -242,7 +261,7 @@ class RefreshBanner extends StatelessWidget {
                 ),
                 TextButton(
                   onPressed: () => perform(context, store.refresh),
-                  child: const Text('重试'),
+                  child: Text(tr('重试')),
                 ),
               ],
             ),

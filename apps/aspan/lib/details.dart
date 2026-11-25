@@ -20,36 +20,37 @@ void openAccount(
 }) => push(context, AccountDetail(store: store, id: id, rule: rule));
 
 String statusLabel(String value) => switch (value) {
-  'pending' => '待处理',
-  'processing' => '处理中',
-  'completed' => '已完成',
-  'skipped' => '已跳过',
-  'failed' => '已失败或放弃',
+  'pending' => tr('待处理'),
+  'processing' => tr('处理中'),
+  'completed' => tr('已完成'),
+  'skipped' => tr('已跳过'),
+  'failed' => tr('已失败或放弃'),
   _ => value,
 };
 String actionLabel(String value) => switch (value) {
-  'create_rule' => '创建规则',
-  'edit_rule' => '编辑规则',
-  'copy' => '完整复制',
-  'merge' => '合并规则',
-  'event' => '处理周期事件',
-  'resource' => '记录资源变化',
-  'correct_entry' => '纠正流水',
-  'delete_rule' => '删除规则',
-  'configure_account' => '账户设置',
+  'create_rule' => tr('创建规则'),
+  'edit_rule' => tr('编辑规则'),
+  'copy' => tr('完整复制'),
+  'merge' => tr('合并规则'),
+  'event' => tr('处理周期事件'),
+  'resource' => tr('记录资源变化'),
+  'correct_entry' => tr('纠正流水'),
+  'delete_rule' => tr('删除规则'),
+  'configure_account' => tr('账户设置'),
   _ => value,
 };
 
-/// Rust records event status in its enum spelling; show it in Chinese.
+/// Rust records event status in its enum spelling and fixed details in
+/// Chinese; show both in the interface language.
 String historyDetail(Json h) {
   final detail = h['detail'] as String? ?? '';
   if (detail.startsWith('{')) return '';
-  return detail
-      .replaceAll('Completed', '已完成')
-      .replaceAll('Processing', '处理中')
-      .replaceAll('Skipped', '已跳过')
-      .replaceAll('Failed', '已失败或放弃')
-      .replaceAll('Pending', '待处理');
+  return tr(detail)
+      .replaceAll('Completed', statusLabel('completed'))
+      .replaceAll('Processing', statusLabel('processing'))
+      .replaceAll('Skipped', statusLabel('skipped'))
+      .replaceAll('Failed', statusLabel('failed'))
+      .replaceAll('Pending', statusLabel('pending'));
 }
 
 Widget historyRow(BuildContext context, Json h) {
@@ -78,7 +79,6 @@ class RecordsPage extends StatelessWidget {
   final SpanStore store;
   final List<Json> Function() items;
   final Widget Function(BuildContext, Json) row;
-  final String empty;
   final void Function(BuildContext, Json)? onTap;
   const RecordsPage({
     super.key,
@@ -86,7 +86,6 @@ class RecordsPage extends StatelessWidget {
     required this.store,
     required this.items,
     required this.row,
-    this.empty = '暂无记录',
     this.onTap,
   });
   @override
@@ -96,11 +95,11 @@ class RecordsPage extends StatelessWidget {
       final list = items();
       return SpanPage(
         title: title,
-        subtitle: Text('${list.length} 条'),
+        subtitle: Text(tr('{n} 条', {'n': list.length})),
         slivers: [
           boxes([const SizedBox(height: 12)]),
           if (list.isEmpty)
-            boxes([EmptyState(empty, '', icon: Icons.history)])
+            boxes([EmptyState(tr('暂无记录'), icon: Icons.history)])
           else
             SliverList.builder(
               itemCount: list.length,
@@ -129,11 +128,7 @@ class RuleDetail extends StatelessWidget {
       if (r == null || r['deleted'] == true) {
         return Scaffold(
           appBar: AppBar(),
-          body: const EmptyState(
-            '规则已移入历史',
-            '已发生的资源流水继续保留，可在账户明细中查看。',
-            icon: Icons.history,
-          ),
+          body: EmptyState(tr('规则已移入历史'), icon: Icons.history),
         );
       }
       final theme = Theme.of(context);
@@ -164,13 +159,13 @@ class RuleDetail extends StatelessWidget {
       final occurrenceCount = occurrences().length;
       final historyCount = historyOf(store, id).length;
       final completeLabel = rule['reset'] != null
-          ? '完成并恢复额度'
+          ? tr('完成并恢复额度')
           : rule['change'] != null
-          ? '完成并记账'
-          : '完成本期';
+          ? tr('完成并记账')
+          : tr('完成本期');
       final graceDays = rule['reminder']['grace_days'] as int? ?? 0;
       final location = [
-        project ?? '未归类',
+        project ?? tr('未归类'),
         for (final t in rule['tags'] as List)
           '#${store.state['tags'][t]?['name'] ?? ''}',
       ].join('  ');
@@ -193,7 +188,7 @@ class RuleDetail extends StatelessWidget {
               Text(
                 [
                   if (const ['reminder', 'grace', 'processing'].contains(phase))
-                    phaseLabels[phase],
+                    phaseLabel(phase),
                   friendlyDate(v['planned'] as String),
                 ].join(' · '),
                 style: theme.textTheme.bodyMedium?.copyWith(
@@ -212,15 +207,23 @@ class RuleDetail extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    '已过 ${(((v['time_progress'] as num?) ?? 0) * 100).round()}%',
+                    tr('已过 {percent}%', {
+                      'percent': (((v['time_progress'] as num?) ?? 0) * 100)
+                          .round(),
+                    }),
                     style: theme.textTheme.bodySmall,
                   ),
                   const Spacer(),
                   Flexible(
                     child: Text(
                       v['next_reminder'] == null
-                          ? '本期无后续提醒'
-                          : '下次提醒 ${friendlyDate(v['next_reminder'] as String, weekday: false)}',
+                          ? tr('本期无后续提醒')
+                          : tr('下次提醒 {date}', {
+                              'date': friendlyDate(
+                                v['next_reminder'] as String,
+                                weekday: false,
+                              ),
+                            }),
                       textAlign: TextAlign.end,
                       style: theme.textTheme.bodySmall,
                     ),
@@ -245,7 +248,7 @@ class RuleDetail extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                     child: PopupMenuButton<String>(
                       key: const ValueKey('period-menu'),
-                      tooltip: '本期其他处理',
+                      tooltip: tr('本期其他处理'),
                       icon: Icon(
                         Icons.more_horiz_rounded,
                         color: theme.colorScheme.primary,
@@ -255,11 +258,11 @@ class RuleDetail extends StatelessWidget {
                         if (phase != 'processing')
                           menuItem(
                             'processing',
-                            '标记处理中',
+                            tr('标记处理中'),
                             Icons.pending_outlined,
                           ),
-                        menuItem('skipped', '跳过本期', Icons.redo_rounded),
-                        menuItem('failed', '失败或放弃', Icons.cancel_outlined),
+                        menuItem('skipped', tr('跳过本期'), Icons.redo_rounded),
+                        menuItem('failed', tr('失败或放弃'), Icons.cancel_outlined),
                       ],
                     ),
                   ),
@@ -268,18 +271,18 @@ class RuleDetail extends StatelessWidget {
             ],
           )
         else if (schedule != null)
-          const Callout(
-            '周期已结束，没有待处理的一期。需要再次安排时，编辑规则并选择新的日期。',
-            icon: Icons.event_busy_outlined,
-          ),
+          Callout(tr('周期已结束'), icon: Icons.event_busy_outlined),
         if (schedule != null) ...[
-          const SectionHeader('周期', large: false),
+          SectionHeader(tr('周期'), large: false),
           Panel(
             children: [
-              ValueRow('重复', value: cycleLabel(object(schedule['cycle']))),
-              ValueRow('提醒', value: reminderSummary(object(rule['reminder']))),
+              ValueRow(tr('重复'), value: cycleLabel(object(schedule['cycle']))),
               ValueRow(
-                '起算',
+                tr('提醒'),
+                value: reminderSummary(object(rule['reminder'])),
+              ),
+              ValueRow(
+                tr('起算'),
                 value: friendlyDate(
                   schedule['anchor'] as String?,
                   weekday: false,
@@ -287,13 +290,9 @@ class RuleDetail extends StatelessWidget {
               ),
             ],
           ),
-          SectionFooter(
-            '${schedule['cycle']['kind'] == 'restart' ? '下一期从实际完成日期起算。' : '按计划日期推进，晚确认不改变周期。'}'
-            '提醒只在应用内显示，系统通知尚未接入。',
-          ),
         ],
         if (group != null) ...[
-          const SectionHeader('合并条目', large: false),
+          SectionHeader(tr('合并条目'), large: false),
           Panel(
             children: [
               ValueRow(
@@ -303,14 +302,13 @@ class RuleDetail extends StatelessWidget {
               ),
             ],
           ),
-          const SectionFooter('与其他成员共享账户；周期、提醒和历史各自独立。'),
         ],
         if (aid != null) ...[
-          SectionHeader(group == null ? '资源' : '共享资源', large: false),
+          SectionHeader(group == null ? tr('资源') : tr('共享资源'), large: false),
           ResourceCard(store: store, account: aid, rule: id),
         ],
         if ((rule['notes'] as String).isNotEmpty) ...[
-          const SectionHeader('备注', large: false),
+          SectionHeader(tr('备注'), large: false),
           Panel(
             padding: const EdgeInsets.all(16),
             children: [
@@ -321,32 +319,31 @@ class RuleDetail extends StatelessWidget {
             ],
           ),
         ],
-        const SectionHeader('记录', large: false),
+        SectionHeader(tr('记录'), large: false),
         Panel(
           children: [
             ValueRow(
-              '周期记录',
+              tr('周期记录'),
               key: const ValueKey('open-occurrences'),
               value: '$occurrenceCount',
               onTap: () => push(
                 context,
                 RecordsPage(
-                  title: '周期记录',
+                  title: tr('周期记录'),
                   store: store,
                   items: occurrences,
-                  empty: '完成、跳过或处理后，每一期都会留在这里',
                   row: occurrenceRow,
                 ),
               ),
             ),
             ValueRow(
-              '操作历史',
+              tr('操作历史'),
               key: const ValueKey('open-history'),
               value: '$historyCount',
               onTap: () => push(
                 context,
                 RecordsPage(
-                  title: '操作历史',
+                  title: tr('操作历史'),
                   store: store,
                   items: () => historyOf(store, id),
                   row: historyRow,
@@ -364,11 +361,11 @@ class RuleDetail extends StatelessWidget {
           TextButton(
             key: const ValueKey('edit-rule'),
             onPressed: () => openCreator(context, store, rule: rule),
-            child: const Text('编辑'),
+            child: Text(tr('编辑')),
           ),
           PopupMenuButton<String>(
             key: const ValueKey('rule-menu'),
-            tooltip: '更多',
+            tooltip: tr('更多'),
             icon: const Icon(Icons.more_horiz_rounded),
             onSelected: (action) => switch (action) {
               'copy' => copyEntry(context, store, id),
@@ -378,14 +375,14 @@ class RuleDetail extends StatelessWidget {
               _ => null,
             },
             itemBuilder: (_) => [
-              menuItem('copy', '完整复制', Icons.copy_outlined),
-              menuItem('template', '存为模板', Icons.bookmark_add_outlined),
+              menuItem('copy', tr('完整复制'), Icons.copy_outlined),
+              menuItem('template', tr('存为模板'), Icons.bookmark_add_outlined),
               if (group == null)
-                menuItem('move', '移动到…', Icons.folder_outlined),
+                menuItem('move', tr('移动到…'), Icons.folder_outlined),
               const PopupMenuDivider(),
               menuItem(
                 'delete',
-                '删除规则',
+                tr('删除规则'),
                 Icons.delete_outline,
                 destructive: true,
               ),
@@ -416,11 +413,17 @@ Widget occurrenceRow(BuildContext context, Json o) {
   final windowEnd = o['window_end'] != o['planned'];
   final detail = [
     if (o['actual'] != null)
-      '实际 ${friendlyDate(o['actual'] as String, weekday: false)}',
+      tr('实际 {date}', {
+        'date': friendlyDate(o['actual'] as String, weekday: false),
+      }),
     if (o['completed'] != null)
-      '处理于 ${friendlyDate(o['completed'] as String, weekday: false)}',
+      tr('处理于 {date}', {
+        'date': friendlyDate(o['completed'] as String, weekday: false),
+      }),
     if (windowEnd)
-      '窗口至 ${friendlyDate(o['window_end'] as String, weekday: false)}',
+      tr('窗口至 {date}', {
+        'date': friendlyDate(o['window_end'] as String, weekday: false),
+      }),
   ].join(' · ');
   return ListTile(
     leading: Icon(icon, color: color, size: 22),
@@ -448,23 +451,16 @@ Future<void> ruleMenu(
     sections: [
       [
         if (planned != null)
-          const MenuAction('complete', '完成本期', Icons.check_circle_outline),
-        const MenuAction('copy', '完整复制', Icons.copy_outlined),
+          MenuAction('complete', tr('完成本期'), Icons.check_circle_outline),
+        MenuAction('copy', tr('完整复制'), Icons.copy_outlined),
         if (onSelect != null)
-          const MenuAction('select', '选择', Icons.checklist_rounded),
+          MenuAction('select', tr('选择'), Icons.checklist_rounded),
       ],
       [
         if (rule['group'] == null)
-          const MenuAction('move', '移动到…', Icons.drive_file_move_outlined),
+          MenuAction('move', tr('移动到…'), Icons.drive_file_move_outlined),
       ],
-      [
-        const MenuAction(
-          'delete',
-          '删除',
-          Icons.delete_outline,
-          destructive: true,
-        ),
-      ],
+      [MenuAction('delete', tr('删除'), Icons.delete_outline, destructive: true)],
     ],
   );
   if (action == null || !context.mounted) return;
@@ -494,12 +490,12 @@ Future<void> groupMenu(
     context,
     position,
     title: group['name'] as String?,
-    sections: const [
+    sections: [
       [
-        MenuAction('open', '打开', Icons.layers_outlined),
-        MenuAction('copy', '完整复制', Icons.copy_outlined),
+        MenuAction('open', tr('打开'), Icons.layers_outlined),
+        MenuAction('copy', tr('完整复制'), Icons.copy_outlined),
       ],
-      [MenuAction('move', '移动到…', Icons.drive_file_move_outlined)],
+      [MenuAction('move', tr('移动到…'), Icons.drive_file_move_outlined)],
     ],
   );
   if (action == null || !context.mounted) return;
@@ -523,9 +519,11 @@ Future<void> copyEntry(BuildContext context, SpanStore store, String id) async {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text(isGroup ? '已复制全部成员、账户与历史' : '已完整复制，副本拥有独立账户与历史'),
+          content: Text(
+            isGroup ? tr('已复制全部成员、账户与历史') : tr('已完整复制，副本拥有独立账户与历史'),
+          ),
           action: SnackBarAction(
-            label: '查看',
+            label: tr('查看'),
             onPressed: () => isGroup
                 ? openGroup(context, store, copy)
                 : openRule(context, store, copy),
@@ -544,13 +542,11 @@ Future<void> deleteRule(
   bool leave = true,
 }) => perform(context, () async {
   final baseRevision = store.revision;
-  final inGroup = store.state['rules'][id]['group'] != null;
   if (!await confirm(
     context,
-    '删除这条规则？',
-    '规则移入历史，不再提醒。已发生的流水和共享余额会保留'
-        '${inGroup ? '；合并条目只剩一个成员时自动变回普通规则' : ''}。此操作无法撤销。',
-    action: '删除',
+    tr('删除这条规则？'),
+    tr('已发生的流水会保留。此操作无法撤销。'),
+    action: tr('删除'),
     destructive: true,
   )) {
     return;
@@ -558,7 +554,7 @@ Future<void> deleteRule(
   await store.mutate('delete_rule', {'id': id}, baseRevision: baseRevision);
   if (context.mounted) {
     if (leave) Navigator.pop(context);
-    notify(context, '规则已删除，流水保留');
+    notify(context, tr('规则已删除，流水保留'));
   }
 });
 
@@ -571,11 +567,10 @@ Future<void> saveAsTemplate(
   final baseRevision = store.revision;
   final name = await askText(
     context,
-    '存为我的模板',
+    tr('存为我的模板'),
     initial: rule['name'] as String,
-    label: '模板名称',
-    helper: '只保存配置（含当前日期），不含余额与历史',
-    action: '保存',
+    label: tr('模板名称'),
+    action: tr('保存'),
   );
   if (name == null || !context.mounted) return;
   await perform(context, () async {
@@ -613,7 +608,7 @@ Future<void> saveAsTemplate(
       'name': name,
       'config': config,
     }, baseRevision: baseRevision);
-  }, success: '已存为模板，新建规则时可直接使用');
+  }, success: tr('已存为模板，新建规则时可直接使用'));
 }
 
 /// One sheet for every period decision; shows exactly what will be recorded.
@@ -629,35 +624,36 @@ Future<void> eventSheet(
   final today = DateTime.now();
   final anchor = DateTime.parse(rule['schedule']['anchor'] as String);
   if (dateOnly(today).compareTo(dateOnly(anchor)) < 0) {
-    notify(context, '周期尚未开始；请在起点当天之后处理，或先编辑起点');
+    notify(context, tr('周期尚未开始；请在起点当天之后处理，或先编辑起点'));
     return;
   }
   final aid = rule['account'] as String?;
   final account = aid == null ? null : store.state['accounts'][aid];
-  final unit = account?['unit']['code'] as String? ?? '';
+  final unit = unitLabel(account?['unit']['code'] as String? ?? '');
   final precision = account?['unit']['precision'] as int? ?? 0;
   final change = rule['change'] as int?, reset = rule['reset'] as int?;
   final effect = account == null
       ? null
       : reset != null
-      ? '恢复额度到 ${formatUnits(reset, precision)} $unit'
+      ? tr('同时恢复额度到 {amount} {unit}', {
+          'amount': formatUnits(reset, precision),
+          'unit': unit,
+        })
       : change != null
-      ? '记录 ${change > 0 ? '+' : ''}${formatUnits(change, precision)} $unit'
+      ? tr('同时记录 {amount} {unit}', {
+          'amount': '${change > 0 ? '+' : ''}${formatUnits(change, precision)}',
+          'unit': unit,
+        })
       : null;
-  final restart = rule['schedule']['cycle']['kind'] == 'restart';
   String actual = dateOnly(today);
   bool record = true;
   bool busy = false;
   String? error;
-  final (title, action, explanation) = switch (status) {
-    'completed' => (
-      '完成本期',
-      '完成',
-      restart ? '下一期从实际发生日期重新计时。' : '下一期仍按原计划日期推进。',
-    ),
-    'processing' => ('标记处理中', '标记处理中', '本期留在“需要处理”中，直到完成、跳过或放弃。'),
-    'skipped' => ('跳过本期', '跳过', '本期结束并进入下一期，不产生资源流水。'),
-    _ => ('失败或放弃', '确认放弃', '本期结束并进入下一期，不产生资源流水。'),
+  final (title, action) = switch (status) {
+    'completed' => (tr('完成本期'), tr('完成')),
+    'processing' => (tr('标记处理中'), tr('标记处理中')),
+    'skipped' => (tr('跳过本期'), tr('跳过')),
+    _ => (tr('失败或放弃'), tr('确认放弃')),
   };
   final accepted = await showSpanSheet<bool>(
     context,
@@ -679,9 +675,9 @@ Future<void> eventSheet(
               children: [
                 ListTile(
                   key: const ValueKey('actual-date'),
-                  title: const Text('实际发生日期'),
+                  title: Text(tr('实际发生日期')),
                   trailing: Text(
-                    actual == dateOnly(today) ? '今天' : friendlyDate(actual),
+                    actual == dateOnly(today) ? tr('今天') : friendlyDate(actual),
                     style: TextStyle(
                       fontSize: 16,
                       color: Theme.of(context).colorScheme.primary,
@@ -703,19 +699,19 @@ Future<void> eventSheet(
                 ),
                 if (effect != null)
                   SwitchListTile(
-                    title: Text('同时$effect'),
-                    subtitle: const Text('写入实际流水，可在账户明细中纠正'),
+                    title: Text(effect),
                     value: record,
                     onChanged: busy ? null : (v) => setState(() => record = v),
                   ),
               ],
-            ),
-          SectionFooter(explanation),
+            )
+          else if (effect != null && status != 'processing')
+            SectionFooter(tr('不产生资源流水。')),
         ],
         actions: [
           OutlinedButton(
             onPressed: busy ? null : () => Navigator.pop(context, false),
-            child: const Text('取消'),
+            child: Text(tr('取消')),
           ),
           FilledButton(
             key: const ValueKey('confirm-event'),
@@ -745,7 +741,7 @@ Future<void> eventSheet(
                       }
                     }
                   },
-            child: Text(busy ? '正在保存…' : action),
+            child: Text(busy ? tr('正在保存…') : action),
           ),
         ],
       ),
@@ -756,10 +752,10 @@ Future<void> eventSheet(
     notify(
       context,
       status == 'processing'
-          ? '已标记处理中'
+          ? tr('已标记处理中')
           : next == null
-          ? '本期已结束，没有下一期'
-          : '本期已结束 · 下次 ${friendlyDate(next)}',
+          ? tr('本期已结束，没有下一期')
+          : tr('本期已结束 · 下次 {date}', {'date': friendlyDate(next)}),
     );
   }
 }
@@ -815,7 +811,7 @@ class ResourceCard extends StatelessWidget {
                               ),
                             ),
                             TextSpan(
-                              text: '  ${v['unit']}',
+                              text: '  ${unitLabel(v['unit'])}',
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: colors.muted,
                               ),
@@ -826,7 +822,7 @@ class ResourceCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Text('明细', style: theme.textTheme.bodySmall),
+                Text(tr('明细'), style: theme.textTheme.bodySmall),
                 Icon(Icons.chevron_right, color: colors.muted),
               ],
             ),
@@ -844,7 +840,10 @@ class ResourceCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '剩余 ${((v['progress'] as num) * 100).round()}% · 参考总量 ${formatUnits(ac['reference'] as int, p)}',
+                  tr('剩余 {percent}% · 参考总量 {total}', {
+                    'percent': ((v['progress'] as num) * 100).round(),
+                    'total': formatUnits(ac['reference'] as int, p),
+                  }),
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -854,7 +853,10 @@ class ResourceCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
             child: Text(
-              '已低于提醒阈值 ${formatUnits(ac['low'] as int, p)} ${v['unit']}',
+              tr('已低于提醒阈值 {amount} {unit}', {
+                'amount': formatUnits(ac['low'] as int, p),
+                'unit': unitLabel(v['unit']),
+              }),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: warningColor(context),
               ),
@@ -904,9 +906,8 @@ class GroupDetail extends StatelessWidget {
       if (g == null || g['deleted'] == true) {
         return Scaffold(
           appBar: AppBar(),
-          body: const EmptyState(
-            '合并条目已变回普通规则',
-            '只剩一个成员时会自动拆开，余额与历史保留。',
+          body: EmptyState(
+            tr('合并条目已变回普通规则'),
             icon: Icons.layers_clear_outlined,
           ),
         );
@@ -915,8 +916,8 @@ class GroupDetail extends StatelessWidget {
         store.rules.where((r) => r['group'] == id).toList(),
       );
       final project = g['project'] == null
-          ? '未归类'
-          : store.state['projects'][g['project']]?['name'] ?? '未归类';
+          ? tr('未归类')
+          : store.state['projects'][g['project']]?['name'] ?? tr('未归类');
       final tags = [
         for (final tid in store.snapshot['group_tags'][id] as List)
           '#${store.state['tags'][tid]['name']}',
@@ -924,14 +925,13 @@ class GroupDetail extends StatelessWidget {
       final historyCount = historyOf(store, id).length;
       final children = <Widget>[
         if ((g['accounts'] as List).isNotEmpty) ...[
-          const SectionHeader('共享资源', large: false),
+          SectionHeader(tr('共享资源'), large: false),
           for (final aid in g['accounts'] as List) ...[
             ResourceCard(store: store, account: aid as String),
             const SizedBox(height: 8),
           ],
-          const SectionFooter('每个账户只计算一次，成员共用同一余额。'),
         ],
-        SectionHeader('成员', note: '${members.length}', large: false),
+        SectionHeader(tr('成员'), note: '${members.length}', large: false),
         ...groupedTiles(
           members,
           (r, f, l) => RuleRow(
@@ -943,30 +943,30 @@ class GroupDetail extends StatelessWidget {
           ),
         ),
         if ((g['archived_accounts'] as List).isNotEmpty) ...[
-          const SectionHeader('合并前账本', large: false),
+          SectionHeader(tr('合并前账本'), large: false),
           Panel(
             children: [
               for (final aid in g['archived_accounts'] as List)
                 ValueRow(
                   store.state['accounts'][aid]['name'] as String,
                   value:
-                      '${store.accountView(aid as String)['formatted']} ${store.accountView(aid)['unit']}',
+                      '${store.accountView(aid as String)['formatted']} ${unitLabel(store.accountView(aid)['unit'])}',
                   onTap: () => openAccount(context, store, aid),
                 ),
             ],
           ),
-          const SectionFooter('仅作历史证据，不计入共享余额。'),
+          SectionFooter(tr('不计入共享余额。')),
         ],
-        const SectionHeader('记录', large: false),
+        SectionHeader(tr('记录'), large: false),
         Panel(
           children: [
             ValueRow(
-              '操作历史',
+              tr('操作历史'),
               value: '$historyCount',
               onTap: () => push(
                 context,
                 RecordsPage(
-                  title: '操作历史',
+                  title: tr('操作历史'),
                   store: store,
                   items: () => historyOf(store, id),
                   row: historyRow,
@@ -978,22 +978,20 @@ class GroupDetail extends StatelessWidget {
       ];
       return SpanPage(
         title: g['name'] as String,
-        subtitle: Text(
-          ['合并条目 · ${members.length} 条规则', project, ...tags].join('  '),
-        ),
+        subtitle: Text([project, ...tags].join('  ')),
         maxWidth: 680,
         actions: [
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: tr('更多'),
             icon: const Icon(Icons.more_horiz_rounded),
             onSelected: (action) => switch (action) {
               'rename' => perform(context, () async {
                 final baseRevision = store.revision;
                 final name = await askText(
                   context,
-                  '重命名合并条目',
+                  tr('重命名合并条目'),
                   initial: g['name'] as String,
-                  action: '保存',
+                  action: tr('保存'),
                 );
                 if (name != null) {
                   await store.mutate('rename_group', {
@@ -1011,10 +1009,10 @@ class GroupDetail extends StatelessWidget {
               _ => null,
             },
             itemBuilder: (_) => [
-              menuItem('rename', '重命名', Icons.drive_file_rename_outline),
-              menuItem('move', '移动到…', Icons.folder_outlined),
-              menuItem('copy', '完整复制', Icons.copy_outlined),
-              menuItem('split', '如何拆分', Icons.call_split),
+              menuItem('rename', tr('重命名'), Icons.drive_file_rename_outline),
+              menuItem('move', tr('移动到…'), Icons.folder_outlined),
+              menuItem('copy', tr('完整复制'), Icons.copy_outlined),
+              menuItem('split', tr('如何拆分'), Icons.call_split),
             ],
           ),
         ],
@@ -1034,24 +1032,22 @@ Future<void> splitGuide(
   final go = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('拆分合并条目', textAlign: TextAlign.center),
-      content: const Text(
-        '为保证两边账户与历史都完整、互不影响，拆分分三步：\n\n'
-        '1. 完整复制此合并条目\n'
-        '2. 在原条目中删除不需要的成员\n'
-        '3. 在副本中删除另一部分成员\n\n'
-        '只剩一个成员时会自动变回普通规则，余额与流水保留。',
+      title: Text(tr('拆分合并条目'), textAlign: TextAlign.center),
+      content: Text(
+        tr(
+          '1. 完整复制此合并条目\n2. 在原条目中删除不需要的成员\n3. 在副本中删除另一部分成员\n\n只剩一个成员时会自动变回普通规则，余额与流水保留。',
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('关闭'),
+          child: Text(tr('关闭')),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context, true),
-          child: const Text(
-            '完整复制',
-            style: TextStyle(fontWeight: FontWeight.w700),
+          child: Text(
+            tr('完整复制'),
+            style: const TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
       ],
@@ -1092,20 +1088,35 @@ class AccountDetail extends StatelessWidget {
                   ? a['id'].toString().compareTo(b['id'].toString())
                   : c;
             });
+      final unit = unitLabel(v['unit']);
       final facts = [
         if (v['progress'] != null)
-          '剩余 ${((v['progress'] as num) * 100).round()}% · 参考总量 ${formatUnits(ac['reference'] as int, p)} ${v['unit']}',
+          tr('剩余 {percent}% · 参考总量 {total} {unit}', {
+            'percent': ((v['progress'] as num) * 100).round(),
+            'total': formatUnits(ac['reference'] as int, p),
+            'unit': unit,
+          }),
         if (ac['low'] != null)
-          '低于 ${formatUnits(ac['low'] as int, p)} ${v['unit']} 时提醒${v['low'] == true ? ' · 已低于' : ''}',
-        if (users.isNotEmpty)
-          '${users.length > 1 ? '共享' : '关联'}：${users.map((r) => r['name']).join('、')}',
+          v['low'] == true
+              ? tr('低于 {amount} {unit} 时提醒 · 已低于', {
+                  'amount': formatUnits(ac['low'] as int, p),
+                  'unit': unit,
+                })
+              : tr('低于 {amount} {unit} 时提醒', {
+                  'amount': formatUnits(ac['low'] as int, p),
+                  'unit': unit,
+                }),
+        if (users.length > 1)
+          tr('共享：{names}', {'names': users.map((r) => r['name']).join(tr('、'))})
+        else if (users.isNotEmpty)
+          tr('关联：{names}', {'names': users.single['name']}),
       ];
       final hero = Panel(
         padding: const EdgeInsets.all(16),
         dividerIndent: -1,
         children: [
           Text(
-            archived ? '归档账本 · 不计入当前共享余量' : '当前余量',
+            archived ? tr('归档账本 · 不计入当前共享余量') : tr('当前余量'),
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 2),
@@ -1121,7 +1132,7 @@ class AccountDetail extends StatelessWidget {
                   ),
                 ),
                 TextSpan(
-                  text: '  ${v['unit']}',
+                  text: '  $unit',
                   style: theme.textTheme.titleMedium?.copyWith(
                     color: colors.muted,
                   ),
@@ -1167,7 +1178,7 @@ class AccountDetail extends StatelessWidget {
                   color: colors.fill,
                   borderRadius: BorderRadius.circular(12),
                   child: PopupMenuButton<String>(
-                    tooltip: '更多账户操作',
+                    tooltip: tr('更多账户操作'),
                     icon: Icon(
                       Icons.more_horiz_rounded,
                       color: theme.colorScheme.primary,
@@ -1176,8 +1187,8 @@ class AccountDetail extends StatelessWidget {
                         ? resourceSheet(context, store, id, 'set', rule)
                         : forecastSheet(context, store, id),
                     itemBuilder: (_) => [
-                      menuItem('set', '修正当前余量', Icons.tune),
-                      menuItem('forecast', '查看预测', Icons.insights_outlined),
+                      menuItem('set', tr('修正当前余量'), Icons.tune),
+                      menuItem('forecast', tr('查看预测'), Icons.insights_outlined),
                     ],
                   ),
                 ),
@@ -1192,7 +1203,7 @@ class AccountDetail extends StatelessWidget {
         actions: [
           if (!archived)
             IconButton(
-              tooltip: '账户设置',
+              tooltip: tr('账户设置'),
               icon: const Icon(Icons.settings_outlined),
               onPressed: () => accountOptionsSheet(context, store, object(ac)),
             ),
@@ -1201,11 +1212,11 @@ class AccountDetail extends StatelessWidget {
           boxes([
             const SizedBox(height: 12),
             hero,
-            SectionHeader('流水', note: '${entries.length}', large: false),
+            SectionHeader(tr('流水'), note: '${entries.length}', large: false),
             if (entries.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text('暂无流水。', style: theme.textTheme.bodySmall),
+                child: Text(tr('暂无流水。'), style: theme.textTheme.bodySmall),
               ),
           ]),
           SliverList.builder(
@@ -1223,26 +1234,26 @@ class AccountDetail extends StatelessWidget {
               child: ledgerRow(context, store, entries[i], p),
             ),
           ),
-          if (entries.isNotEmpty) boxes([const SectionFooter('点按一条流水可查看或纠正。')]),
         ],
       );
     },
   );
 }
 
+/// The user's note; fixed notes written by the core are translated.
 String entryNote(Json entry) {
   final note = entry['note'] as String;
   return entry['source'] == 'manual'
       ? note.replaceFirst(RegExp(r'^(add|consume|set):-?\d+:'), '')
-      : note;
+      : tr(note);
 }
 
 String sourceLabel(String source) => switch (source) {
-  'initial' => '初始基准',
-  'manual' => '手动记录',
-  'confirmed' => '事件确认',
-  'correction' => '纠正替代',
-  'correction_reverse' => '纠正反向',
+  'initial' => tr('初始基准'),
+  'manual' => tr('手动记录'),
+  'confirmed' => tr('事件确认'),
+  'correction' => tr('纠正替代'),
+  'correction_reverse' => tr('纠正反向'),
   _ => source,
 };
 
@@ -1266,7 +1277,7 @@ Widget ledgerRow(BuildContext context, SpanStore store, Json e, int precision) {
         friendlyDate(e['date'] as String, weekday: false),
         if (note.isNotEmpty) sourceLabel(e['source'] as String),
         if (rule != null) rule['name'],
-        if (corrected) '已纠正',
+        if (corrected) tr('已纠正'),
       ].join(' · '),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
@@ -1301,42 +1312,42 @@ Future<void> entrySheet(
   final correct = await showSpanSheet<bool>(
     context,
     (context) => SheetBody(
-      title: '${delta > 0 ? '+' : ''}${formatUnits(delta, precision)} $unit',
+      title:
+          '${delta > 0 ? '+' : ''}${formatUnits(delta, precision)} ${unitLabel(unit)}',
       subtitle:
           '${friendlyDate(e['date'] as String)} · ${sourceLabel(e['source'] as String)}',
       content: [
         Panel(
           children: [
-            if (entryNote(e).isNotEmpty) ValueRow('备注', value: entryNote(e)),
-            if (rule != null) ValueRow('关联规则', value: rule['name'] as String),
-            if (e['origin'] != null) ValueRow('来源记录', value: '${e['origin']}'),
-            if (e['corrected_by'] != null)
-              const ListTile(
-                title: Text('已纠正'),
-                subtitle: Text('原记录保留；实际影响由反向与替代流水承担'),
-              ),
+            if (entryNote(e).isNotEmpty)
+              ValueRow(tr('备注'), value: entryNote(e)),
+            if (rule != null)
+              ValueRow(tr('关联规则'), value: rule['name'] as String),
+            if (e['origin'] != null)
+              ValueRow(tr('来源记录'), value: '${e['origin']}'),
+            if (e['corrected_by'] != null) ListTile(title: Text(tr('已纠正'))),
             if (e['source'] == 'correction_reverse')
-              const ListTile(
-                title: Text('系统反向流水'),
-                subtitle: Text('不能再次纠正；如需更改，请纠正对应的替代流水'),
+              ListTile(
+                title: Text(tr('系统反向流水')),
+                subtitle: Text(tr('不能再次纠正；如需更改，请纠正对应的替代流水')),
               ),
             if (entryNote(e).isEmpty &&
                 rule == null &&
                 e['origin'] == null &&
                 correctable)
-              const ListTile(title: Text('没有附加信息')),
+              ListTile(title: Text(tr('没有附加信息'))),
           ],
         ),
       ],
       actions: [
         OutlinedButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('关闭'),
+          child: Text(tr('关闭')),
         ),
         if (correctable)
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('纠正此流水'),
+            child: Text(tr('纠正此流水')),
           ),
       ],
     ),
@@ -1351,16 +1362,15 @@ Future<void> entrySheet(
 class _SheetForm extends StatefulWidget {
   /// key, label, initial value, required.
   final List<(String, String, String, bool)> fields;
-  final String title, subtitle, action;
-  final String? note;
-  final String? suffix;
+  final String title, action;
+  final String? subtitle, note, suffix;
   final Future<String?> Function(Map<String, String>) submit;
   const _SheetForm({
     required this.fields,
     required this.title,
-    required this.subtitle,
     required this.action,
     required this.submit,
+    this.subtitle,
     this.note,
     this.suffix,
   });
@@ -1389,7 +1399,9 @@ class _SheetFormState extends State<_SheetForm> {
     };
     errors.clear();
     for (final f in widget.fields) {
-      if (f.$4 && values[f.$1]!.isEmpty) errors[f.$1] = '请填写${f.$2}';
+      if (f.$4 && values[f.$1]!.isEmpty) {
+        errors[f.$1] = tr('请填写{label}', {'label': f.$2});
+      }
     }
     if (errors.isNotEmpty) {
       setState(() {});
@@ -1448,7 +1460,7 @@ class _SheetFormState extends State<_SheetForm> {
       actions: [
         OutlinedButton(
           onPressed: busy ? null : () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(tr('取消')),
         ),
         FilledButton(
           key: const ValueKey('sheet-submit'),
@@ -1482,24 +1494,29 @@ Future<void> resourceSheet(
   final title = switch (action) {
     'add' => add,
     'consume' => consume,
-    _ => '修正当前余量',
+    _ => tr('修正当前余量'),
   };
+  final unit = unitLabel(v['unit']);
   final message = await showSpanSheet<String>(
     context,
     (_) => _SheetForm(
       title: title,
-      subtitle: '${ac['name']} · 当前 ${v['formatted']} ${v['unit']}',
-      action: action == 'set' ? '修正' : title,
-      suffix: v['unit'] as String,
-      note: action == 'set' ? '将追加一条差额流水使余量等于输入值；原有流水保留。' : null,
+      subtitle: tr('{name} · 当前 {amount} {unit}', {
+        'name': ac['name'],
+        'amount': v['formatted'],
+        'unit': unit,
+      }),
+      action: action == 'set' ? tr('修正') : title,
+      suffix: unit,
+      note: action == 'set' ? tr('将追加一条差额流水使余量等于输入值；原有流水保留。') : null,
       fields: [
         (
           'amount',
-          action == 'set' ? '正确的当前余量' : '数量',
+          action == 'set' ? tr('正确的当前余量') : tr('数量'),
           action == 'consume' && ac['unit']['kind'] == 'count' ? '1' : '',
           true,
         ),
-        ('note', '备注（可选）', '', false),
+        ('note', tr('备注（可选）'), '', false),
       ],
       submit: (values) async {
         await store.mutate('resource', {
@@ -1511,7 +1528,10 @@ Future<void> resourceSheet(
           if (values['note']!.isNotEmpty) 'note': values['note'],
         }, baseRevision: baseRevision);
         final now = store.accountView(aid);
-        return '已记录 · 当前 ${now['formatted']} ${now['unit']}';
+        return tr('已记录 · 当前 {amount} {unit}', {
+          'amount': now['formatted'],
+          'unit': unitLabel(now['unit']),
+        });
       },
     ),
   );
@@ -1529,20 +1549,23 @@ Future<void> correctSheet(
   final message = await showSpanSheet<String>(
     context,
     (_) => _SheetForm(
-      title: '纠正流水',
-      subtitle:
-          '原记录 ${formatUnits(entry['delta'] as int, precision)} $unit · ${friendlyDate(entry['date'] as String)}',
-      action: '提交纠正',
-      suffix: unit,
-      note: '原流水保留；将同时追加一条反向流水和一条替代流水，原因写入审计历史。',
+      title: tr('纠正流水'),
+      subtitle: tr('原记录 {amount} {unit} · {date}', {
+        'amount': formatUnits(entry['delta'] as int, precision),
+        'unit': unitLabel(unit),
+        'date': friendlyDate(entry['date'] as String),
+      }),
+      action: tr('提交纠正'),
+      suffix: unitLabel(unit),
+      note: tr('原流水保留，将追加一条反向流水和一条替代流水。'),
       fields: [
         (
           'delta',
-          '正确的变化值（扣减为负数）',
+          tr('正确的变化值（扣减为负数）'),
           formatUnits(entry['delta'] as int, precision),
           true,
         ),
-        ('reason', '纠正原因', '', true),
+        ('reason', tr('纠正原因'), '', true),
       ],
       submit: (values) async {
         await store.mutate('correct_entry', {
@@ -1550,7 +1573,7 @@ Future<void> correctSheet(
           'delta': values['delta'],
           'reason': values['reason'],
         }, baseRevision: baseRevision);
-        return '已纠正，原记录保留';
+        return tr('已纠正，原记录保留');
       },
     ),
   );
@@ -1564,15 +1587,15 @@ Future<void> forecastSheet(
 ) => perform(context, () async {
   final forecast = await store.read('forecast', {'account': id});
   if (!context.mounted) return;
-  final unit = store.accountView(id)['unit'];
+  final unit = unitLabel(store.accountView(id)['unit']);
   await showSpanSheet<void>(
     context,
     (context) => SheetBody(
-      title: '余量预测',
-      subtitle: forecast['assumption'] as String,
+      title: tr('余量预测'),
+      subtitle: tr('预测只读，不会记账。'),
       content: [
         if ((forecast['events'] as List).isEmpty)
-          const Callout('没有固定的扣费或恢复计划，无法估算。完成后重新计时的周期不参与预测。')
+          Callout(tr('没有固定的扣费或恢复计划，无法估算。'))
         else
           Panel(
             children: [
@@ -1582,20 +1605,21 @@ Future<void> forecastSheet(
                     '${friendlyDate(e['planned'] as String)} · ${store.state['rules'][e['rule']]?['name'] ?? ''}',
                   ),
                   subtitle: Text(
-                    '变化 ${e['delta']} $unit · 预计余量 ${e['balance']} $unit',
+                    tr('变化 {delta} {unit} · 预计余量 {balance} {unit}', {
+                      'delta': e['delta'],
+                      'balance': e['balance'],
+                      'unit': unit,
+                    }),
                   ),
                   trailing: e['insufficient'] == true
                       ? Text(
-                          '可能不足',
+                          tr('可能不足'),
                           style: TextStyle(color: warningColor(context)),
                         )
                       : null,
                 ),
             ],
           ),
-        SectionFooter(
-          '${forecast['truncated'] == true ? '仅显示最近的计划。' : ''}预测只读，不会记账。',
-        ),
       ],
     ),
   );
@@ -1611,14 +1635,13 @@ Future<void> accountOptionsSheet(
   final message = await showSpanSheet<String>(
     context,
     (_) => _SheetForm(
-      title: '账户设置',
-      subtitle: '共享成员看到同一设置；不改变实际余额',
-      action: '保存',
+      title: tr('账户设置'),
+      action: tr('保存'),
       fields: [
-        ('name', '账户名称', account['name'] as String, true),
+        ('name', tr('账户名称'), account['name'] as String, true),
         (
           'reference',
-          '参考总量（可留空）',
+          tr('参考总量（可留空）'),
           account['reference'] == null
               ? ''
               : formatUnits(account['reference'] as int, p),
@@ -1626,7 +1649,7 @@ Future<void> accountOptionsSheet(
         ),
         (
           'low',
-          '低于此值时提醒（可留空）',
+          tr('低于此值时提醒（可留空）'),
           account['low'] == null ? '' : formatUnits(account['low'] as int, p),
           false,
         ),
@@ -1640,7 +1663,7 @@ Future<void> accountOptionsSheet(
               : values['reference'],
           'low': values['low']!.isEmpty ? null : values['low'],
         }, baseRevision: baseRevision);
-        return '账户设置已保存';
+        return tr('账户设置已保存');
       },
     ),
   );
@@ -1654,21 +1677,21 @@ Future<void> moveEntry(
 ) async {
   final baseRevision = store.revision;
   if (entry['group'] != null) {
-    notify(context, '成员随所属合并条目一起移动，请在合并条目中操作');
+    notify(context, tr('成员随所属合并条目一起移动，请在合并条目中操作'));
     return;
   }
   final current = entry['project'] as String?;
   final project = await showSpanSheet<String>(
     context,
     (context) => SheetBody(
-      title: '移动到',
+      title: tr('移动到'),
       subtitle: entry['name'] as String,
       content: [
         Panel(
           dividerIndent: 52,
           children: [
             for (final (id, name) in [
-              ('__root__', '未归类'),
+              ('__root__', tr('未归类')),
               for (final p in store.projects)
                 (p['id'] as String, p['name'] as String),
             ])
@@ -1700,7 +1723,11 @@ Future<void> moveEntry(
   if (context.mounted) {
     notify(
       context,
-      '已移动到「${project == '__root__' ? '未归类' : store.state['projects'][project]['name']}」',
+      tr('已移动到「{place}」', {
+        'place': project == '__root__'
+            ? tr('未归类')
+            : store.state['projects'][project]['name'],
+      }),
     );
   }
 }

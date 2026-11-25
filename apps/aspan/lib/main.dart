@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app.dart';
@@ -27,15 +28,22 @@ Future<void> main() async {
     await store.refresh();
     runApp(ASpanApp(store: store));
   } catch (error) {
+    // The stored preference is unreadable here, so follow the device.
+    initLanguage(AppLanguage.system);
     runApp(
       MaterialApp(
+        locale: uiLanguage.locale,
+        supportedLocales: supportedUiLocales,
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         theme: spanTheme(Brightness.light),
         darkTheme: spanTheme(Brightness.dark),
         home: Scaffold(
           body: SafeArea(
             child: EmptyState(
-              'ASpan 无法打开',
-              '原数据保留，未做任何修改。\n${errorMessage(error)}',
+              tr('ASpan 无法打开'),
+              message: tr('原数据保留，未做任何修改。\n{error}', {
+                'error': errorMessage(error),
+              }),
               icon: Icons.error_outline,
             ),
           ),

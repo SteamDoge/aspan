@@ -49,13 +49,13 @@ class RuleRow extends StatelessWidget {
         : store.state['tags'][tags.first]?['name'];
     final balance = account == null
         ? null
-        : '${account['formatted']} ${account['unit']}';
+        : '${account['formatted']} ${unitLabel(account['unit'])}';
     final ended = rule['schedule'] != null && v['planned'] == null;
     final status = days != null
         ? phase == 'grace' || phase == 'processing'
-              ? '${phaseLabels[phase]} · ${relativeDays(days)}'
+              ? '${phaseLabel(phase)} · ${relativeDays(days)}'
               : relativeDays(days)
-        : balance ?? (ended ? '周期已结束' : null);
+        : balance ?? (ended ? tr('周期已结束') : null);
     final meta = [
       if (v['planned'] != null)
         friendlyDate(v['planned'] as String, weekday: false),
@@ -144,7 +144,7 @@ class RuleRow extends StatelessWidget {
                         ProgressBar(
                           value: progress.toDouble(),
                           color: accent,
-                          label: '资源剩余比例',
+                          label: tr('资源剩余比例'),
                         ),
                       ],
                     ],
@@ -168,7 +168,7 @@ class CompleteButton extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
     child: Tooltip(
-      message: '完成本期',
+      message: tr('完成本期'),
       child: TextButton(
         onPressed: onPressed,
         style: TextButton.styleFrom(
@@ -179,7 +179,7 @@ class CompleteButton extends StatelessWidget {
           textStyle: Theme.of(context).textTheme.labelLarge
               ?.copyWith(fontSize: 14),
         ),
-        child: const Text('完成'),
+        child: Text(tr('完成')),
       ),
     ),
   );
@@ -215,14 +215,14 @@ class GroupRow extends StatelessWidget {
     final colors = SpanColors.of(context);
     final shared = [
       for (final aid in group['accounts'] as List)
-        '${store.accountView(aid as String)['formatted']} ${store.accountView(aid)['unit']}',
+        '${store.accountView(aid as String)['formatted']} ${unitLabel(store.accountView(aid)['unit'])}',
     ];
     final urgent = members
         .map((m) => store.view(m['id'] as String)['phase'] as String)
         .where(actionPhases.contains)
         .length;
     final meta = [
-      '${members.length} 条规则',
+      tr('{n} 条规则', {'n': members.length}),
       if (shared.isNotEmpty) shared.join(' / '),
     ].join(' · ');
     return AnimatedOpacity(
@@ -264,7 +264,7 @@ class GroupRow extends StatelessWidget {
                           children: [
                             if (urgent > 0)
                               TextSpan(
-                                text: '$urgent 条需处理   ',
+                                text: '${tr('{n} 条需处理', {'n': urgent})}   ',
                                 style: TextStyle(
                                   color: warningColor(context),
                                   fontWeight: FontWeight.w500,
@@ -291,7 +291,7 @@ class GroupRow extends StatelessWidget {
             else if (onToggle != null)
               IconButton(
                 key: ValueKey('toggle-${group['id']}'),
-                tooltip: expanded ? '收起成员' : '展开成员',
+                tooltip: expanded ? tr('收起成员') : tr('展开成员'),
                 onPressed: onToggle,
                 icon: AnimatedRotation(
                   turns: expanded ? .25 : 0,
@@ -369,7 +369,7 @@ class TimelineBar extends StatelessWidget {
         : 1.0;
     final colors = SpanColors.of(context);
     return Semantics(
-      label: '时间进度',
+      label: tr('时间进度'),
       value: '${(progress * 100).round()}%',
       child: SizedBox(
         height: compact ? 5 : 14,

@@ -8,8 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'data.dart';
+import 'l10n/l10n.dart';
 import 'palette.dart';
 
+export 'l10n/l10n.dart';
 export 'palette.dart';
 
 // ---------------------------------------------------------------------------
@@ -18,26 +20,34 @@ export 'palette.dart';
 const gutter = 16.0;
 const tabular = [FontFeature.tabularFigures()];
 
+/// Messages from the Rust core are Simplified Chinese; [tr] translates the
+/// static ones and passes messages with dynamic parts through unchanged.
 String errorMessage(Object error) {
-  if (error is AspanError) return error.message;
-  if (error is PlatformException) return error.message ?? '文件操作失败，请重试';
+  if (error is AspanError) return tr(error.message);
+  if (error is PlatformException) {
+    return error.message ?? tr('文件操作失败，请重试');
+  }
   if (error is FormatException) return error.message;
-  if (error is StateError) return error.message.toString();
-  return '操作未完成，请检查文件或安装环境后重试';
+  if (error is StateError) return tr(error.message.toString());
+  return tr('操作未完成，请检查文件或安装环境后重试');
 }
 
 // ---------------------------------------------------------------------------
 // Business status vocabulary. Values come from Rust; Flutter only labels them.
 // ---------------------------------------------------------------------------
-const phaseLabels = {
-  'normal': '待发生',
-  'reminder': '提前提醒',
-  'due': '今天处理',
-  'grace': '处理窗口',
-  'overdue': '已逾期',
-  'processing': '处理中',
-  'idle': '无待办周期',
+String phaseLabel(String phase) => switch (phase) {
+  'normal' => tr('待发生'),
+  'reminder' => tr('提前提醒'),
+  'due' => tr('今天处理'),
+  'grace' => tr('处理窗口'),
+  'overdue' => tr('已逾期'),
+  'processing' => tr('处理中'),
+  'idle' => tr('无待办周期'),
+  _ => phase,
 };
+
+/// Count units are stored as the code `次`; other units are user text.
+String unitLabel(Object? code) => tr(code == null ? '' : code.toString());
 
 Color warningColor(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
@@ -58,50 +68,86 @@ Color phaseColor(BuildContext context, String phase) => switch (phase) {
 /// Phases that ask the user to act now; ordered by urgency.
 const actionPhases = ['overdue', 'due', 'grace', 'processing'];
 
-const ruleIcons = [
-  ('schedule', '时间', Icons.timelapse_outlined),
-  ('payments', '支付', Icons.payments_outlined),
-  ('resource', '资源', Icons.toll_outlined),
-  ('maintenance', '维护', Icons.build_outlined),
-  ('expiry', '有效期', Icons.verified_user_outlined),
-  ('medication', '吃药', Icons.medication_outlined),
-  ('task', '待办', Icons.task_alt_outlined),
-  ('birthday', '生日', Icons.cake_outlined),
+List<(String, String, IconData)> get ruleIcons => [
+  ('schedule', tr('时间'), Icons.timelapse_outlined),
+  ('payments', tr('支付'), Icons.payments_outlined),
+  ('resource', tr('资源'), Icons.toll_outlined),
+  ('maintenance', tr('维护'), Icons.build_outlined),
+  ('expiry', tr('有效期'), Icons.verified_user_outlined),
+  ('medication', tr('吃药'), Icons.medication_outlined),
+  ('task', tr('待办'), Icons.task_alt_outlined),
+  ('birthday', tr('生日'), Icons.cake_outlined),
 ];
-IconData ruleIcon(String? key) =>
-    ruleIcons.firstWhere((e) => e.$1 == key, orElse: () => ruleIcons.first).$3;
+IconData ruleIcon(String? key) {
+  final icons = ruleIcons;
+  return icons.firstWhere((e) => e.$1 == key, orElse: () => icons.first).$3;
+}
 
 // ---------------------------------------------------------------------------
 // Date display. Rust owns date arithmetic; these only format returned values.
 // ---------------------------------------------------------------------------
-const _weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+const _months = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+String _weekday(int day) => switch (day) {
+  DateTime.monday => tr('周一'),
+  DateTime.tuesday => tr('周二'),
+  DateTime.wednesday => tr('周三'),
+  DateTime.thursday => tr('周四'),
+  DateTime.friday => tr('周五'),
+  DateTime.saturday => tr('周六'),
+  _ => tr('周日'),
+};
+
+/// "11月23日 周一" / "Mon, Nov 23"; the year appears when it is not this year.
 String friendlyDate(String? iso, {bool weekday = true}) {
   if (iso == null) return '—';
   final d = DateTime.tryParse(iso);
   if (d == null) return iso;
-  final now = DateTime.now();
-  final year = d.year == now.year ? '' : '${d.year}年';
-  return '$year${d.month}月${d.day}日${weekday ? ' 周${_weekdays[d.weekday - 1]}' : ''}';
+  final month = uiLanguage == UiLanguage.en ? _months[d.month - 1] : d.month;
+  final date = d.year == DateTime.now().year
+      ? tr('{month}月{day}日', {'month': month, 'day': d.day})
+      : tr('{year}年{month}月{day}日', {
+          'year': d.year,
+          'month': month,
+          'day': d.day,
+        });
+  if (!weekday) return date;
+  return tr('{date} {weekday}', {'date': date, 'weekday': _weekday(d.weekday)});
 }
 
 String relativeDays(int days) => switch (days) {
-  0 => '今天',
-  1 => '明天',
-  -1 => '昨天',
-  > 1 => '$days 天后',
-  _ => '逾期 ${-days} 天',
+  0 => tr('今天'),
+  1 => tr('明天'),
+  -1 => tr('昨天'),
+  > 1 => tr('{n} 天后', {'n': days}),
+  _ => tr('逾期 {n} 天', {'n': -days}),
 };
 
 String cycleLabel(Json? cycle) => switch (cycle?['kind']) {
-  null => '无周期',
-  'once' => '单次',
-  'daily' => '每日',
-  'weekly' => '每周',
-  'monthly' => '每月',
-  'yearly' => '每年',
-  'interval' => '每 ${cycle!['days']} 天',
-  'restart' => '完成后每 ${cycle!['days']} 天',
-  'calendar' => '指定 ${(cycle!['dates'] as List?)?.length ?? 0} 个日期',
+  null => tr('无周期'),
+  'once' => tr('单次'),
+  'daily' => tr('每日'),
+  'weekly' => tr('每周'),
+  'monthly' => tr('每月'),
+  'yearly' => tr('每年'),
+  'interval' => tr('每 {n} 天', {'n': cycle!['days']}),
+  'restart' => tr('完成后每 {n} 天', {'n': cycle!['days']}),
+  'calendar' => tr('指定 {n} 个日期', {
+    'n': (cycle!['dates'] as List?)?.length ?? 0,
+  }),
   _ => '${cycle!['kind']}',
 };
 
@@ -111,19 +157,23 @@ String reminderSummary(Json reminder) {
   final grace = reminder['grace_days'] as int? ?? 0;
   final repeat = reminder['repeat_days'] as int?;
   final parts = [
-    if (before.isNotEmpty) '提前 ${before.join('、')} 天',
-    if (reminder['on_day'] == true) '当天',
-    if (grace > 0) '处理窗口 $grace 天',
-    if (repeat != null) '每 $repeat 天重复',
+    if (before.isNotEmpty)
+      tr('提前 {days} 天', {
+        // A single value keeps its number so English can choose "day".
+        'days': before.length == 1 ? before.single : before.join(tr('、')),
+      }),
+    if (reminder['on_day'] == true) tr('当天'),
+    if (grace > 0) tr('处理窗口 {n} 天', {'n': grace}),
+    if (repeat != null) tr('每 {n} 天重复', {'n': repeat}),
   ];
-  return parts.isEmpty ? '不提醒' : parts.join(' · ');
+  return parts.isEmpty ? tr('不提醒') : parts.join(' · ');
 }
 
 /// Verbs follow the unit so a count card says "使用" and money says "扣费".
 (String add, String consume) resourceVerbs(String? kind) => switch (kind) {
-  'money' => ('充值', '扣费'),
-  'count' => ('增加次数', '使用'),
-  _ => ('增加', '消耗'),
+  'money' => (tr('充值'), tr('扣费')),
+  'count' => (tr('增加次数'), tr('使用')),
+  _ => (tr('增加'), tr('消耗')),
 };
 
 // ---------------------------------------------------------------------------
@@ -157,7 +207,7 @@ Future<String?> askText(
   String initial = '',
   String? label,
   String? helper,
-  String action = '确定',
+  String? action,
   TextInputType? keyboard,
 }) => showDialog<String>(
   context: context,
@@ -170,7 +220,9 @@ Future<String?> askText(
           void submit() {
             final value = controller.text.trim();
             if (value.isEmpty) {
-              setState(() => error = '请填写${label ?? '名称'}');
+              setState(
+                () => error = tr('请填写{label}', {'label': label ?? tr('名称')}),
+              );
               return;
             }
             Navigator.pop(context, value);
@@ -183,7 +235,7 @@ Future<String?> askText(
               controller: controller,
               keyboardType: keyboard,
               decoration: InputDecoration(
-                hintText: label ?? '名称',
+                hintText: label ?? tr('名称'),
                 helperText: helper,
                 errorText: error,
               ),
@@ -195,12 +247,12 @@ Future<String?> askText(
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('取消'),
+                child: Text(tr('取消')),
               ),
               TextButton(
                 onPressed: submit,
                 child: Text(
-                  action,
+                  action ?? tr('确定'),
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
@@ -242,7 +294,7 @@ Future<bool> confirm(
   BuildContext context,
   String title,
   String message, {
-  String action = '确认',
+  String? action,
   bool destructive = false,
 }) async =>
     await showDialog<bool>(
@@ -254,7 +306,7 @@ Future<bool> confirm(
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+            child: Text(tr('取消')),
           ),
           TextButton(
             style: destructive
@@ -264,7 +316,7 @@ Future<bool> confirm(
                 : null,
             onPressed: () => Navigator.pop(context, true),
             child: Text(
-              action,
+              action ?? tr('确认'),
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -514,13 +566,13 @@ class SpanToolbar extends StatelessWidget {
 /// button with the same icon for adding content.
 class AddButton extends StatelessWidget {
   final VoidCallback onPressed;
-  final String tooltip;
-  const AddButton({super.key, required this.onPressed, this.tooltip = '新建规则'});
+  final String? tooltip;
+  const AddButton({super.key, required this.onPressed, this.tooltip});
   @override
   Widget build(BuildContext context) => FloatingActionButton(
     // Several pages can show one at a time (tabs share a route).
     heroTag: null,
-    tooltip: tooltip,
+    tooltip: tooltip ?? tr('新建规则'),
     onPressed: onPressed,
     child: const Icon(Icons.add, size: 28),
   );
@@ -529,13 +581,13 @@ class AddButton extends StatelessWidget {
 /// Rounded, filled search field in the style of a system search bar.
 class SearchField extends StatelessWidget {
   final TextEditingController controller;
-  final String hint;
+  final String? hint;
   final ValueChanged<String> onChanged;
   const SearchField({
     super.key,
     required this.controller,
     required this.onChanged,
-    this.hint = '搜索',
+    this.hint,
   });
   @override
   Widget build(BuildContext context) {
@@ -549,7 +601,7 @@ class SearchField extends StatelessWidget {
           textInputAction: TextInputAction.search,
           style: const TextStyle(fontSize: 16),
           decoration: InputDecoration(
-            hintText: hint,
+            hintText: hint ?? tr('搜索'),
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(vertical: 9),
             prefixIcon: Icon(Icons.search, size: 20, color: colors.muted),
@@ -557,7 +609,7 @@ class SearchField extends StatelessWidget {
             suffixIcon: value.text.isEmpty
                 ? null
                 : IconButton(
-                    tooltip: '清除搜索',
+                    tooltip: tr('清除搜索'),
                     onPressed: () {
                       controller.clear();
                       onChanged('');
@@ -949,7 +1001,6 @@ class ValueRow extends StatelessWidget {
 /// Settings-style switch row.
 class SwitchRow extends StatelessWidget {
   final String label;
-  final String? detail;
   final bool value;
   final ValueChanged<bool>? onChanged;
   final Key? switchKey;
@@ -958,7 +1009,6 @@ class SwitchRow extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
-    this.detail,
     this.switchKey,
   });
   @override
@@ -971,16 +1021,7 @@ class SwitchRow extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 6, 10, 6),
           child: Row(
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label, style: theme.textTheme.bodyLarge),
-                    if (detail != null)
-                      Text(detail!, style: theme.textTheme.bodySmall),
-                  ],
-                ),
-              ),
+              Expanded(child: Text(label, style: theme.textTheme.bodyLarge)),
               Switch(key: switchKey, value: value, onChanged: onChanged),
             ],
           ),
@@ -1014,13 +1055,14 @@ class IconTile extends StatelessWidget {
 }
 
 class EmptyState extends StatelessWidget {
-  final String title, message;
+  final String title;
+  final String? message;
   final IconData icon;
   final Widget? action;
   const EmptyState(
-    this.title,
-    this.message, {
+    this.title, {
     super.key,
+    this.message,
     this.icon = Icons.inbox_outlined,
     this.action,
   });
@@ -1040,12 +1082,14 @@ class EmptyState extends StatelessWidget {
             textAlign: TextAlign.center,
             style: theme.textTheme.titleLarge,
           ),
-          const SizedBox(height: 6),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(color: colors.muted),
-          ),
+          if (message != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              message!,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: colors.muted),
+            ),
+          ],
           if (action != null) ...[const SizedBox(height: 18), action!],
         ],
       ),
@@ -1113,7 +1157,7 @@ Future<T?> showContextMenu<T>(
   return showGeneralDialog<T>(
     context: context,
     barrierDismissible: true,
-    barrierLabel: '关闭菜单',
+    barrierLabel: tr('关闭菜单'),
     barrierColor: Colors.black.withValues(alpha: .12),
     // Reduced motion: the menu fades in without growing.
     transitionDuration: const Duration(milliseconds: 160),

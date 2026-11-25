@@ -25,10 +25,10 @@ class Folder {
 
   String get key => id == null ? kind : '$kind-$id';
   String title(SpanStore store) => switch (kind) {
-    'home' => '主页',
-    'all' => '全部规则',
-    'inbox' => '未归类',
-    'project' => store.state['projects'][id]?['name'] as String? ?? '文件夹',
+    'home' => tr('主页'),
+    'all' => tr('全部规则'),
+    'inbox' => tr('未归类'),
+    'project' => store.state['projects'][id]?['name'] as String? ?? tr('文件夹'),
     _ => '#${store.state['tags'][id]?['name'] ?? ''}',
   };
   @override
@@ -121,7 +121,7 @@ class _FolderViewState extends State<FolderView> {
       await perform(
         context,
         () => store.mutate('setting', {'key': 'sort', 'value': 'manual'}),
-        success: '已切换为手动排序，原手动顺序保留',
+        success: tr('已切换为手动排序，原手动顺序保留'),
       );
     }
     if (mounted) setMode(Mode.reorder);
@@ -237,7 +237,7 @@ class _FolderViewState extends State<FolderView> {
             p['name'] as String,
             rest.where((r) => r['project'] == p['id']).toList(),
           ),
-        ('未归类', rest.where((r) => r['project'] == null).toList()),
+        (tr('未归类'), rest.where((r) => r['project'] == null).toList()),
       ] else if (kind == 'tag') ...[
         for (final t in [
           ...store.tags,
@@ -248,9 +248,9 @@ class _FolderViewState extends State<FolderView> {
                 .where((r) => List<String>.from(r['tags']).contains(t['id']))
                 .toList(),
           ),
-        ('无标签', rest.where((r) => List.from(r['tags']).isEmpty).toList()),
+        (tr('无标签'), rest.where((r) => List.from(r['tags']).isEmpty).toList()),
       ] else
-        ('全部规则', rest),
+        (tr('全部规则'), rest),
     ];
     final low = store.accounts
         .where(
@@ -262,7 +262,7 @@ class _FolderViewState extends State<FolderView> {
         .toList();
     return [
       if (low.isNotEmpty) ...[
-        const SectionHeader('余量不足'),
+        SectionHeader(tr('余量不足')),
         ...groupedTiles(
           low,
           (a, f, l) => GroupedTile(
@@ -272,20 +272,22 @@ class _FolderViewState extends State<FolderView> {
             child: ValueRow(
               a['name'] as String,
               value:
-                  '${store.accountView(a['id'] as String)['formatted']} ${a['unit']['code']}',
+                  '${store.accountView(a['id'] as String)['formatted']} ${unitLabel(a['unit']['code'])}',
               valueColor: warningColor(context),
               chevron: true,
             ),
           ),
         ),
       ],
-      if (pinned.isNotEmpty) ...section('置顶', pinned),
+      if (pinned.isNotEmpty) ...section(tr('置顶'), pinned),
       for (final (title, list) in groups)
         if (list.isNotEmpty) ...section(title, list),
       if (place != null && rules.isEmpty && store.rules.isNotEmpty)
         EmptyState(
-          '这里还没有规则',
-          '主页当前只显示「${Folder(kind, place).title(store)}」，可在右上角菜单改回全部规则。',
+          tr('这里还没有规则'),
+          message: tr('主页当前只显示「{place}」，可在右上角菜单改回全部规则。', {
+            'place': Folder(kind, place).title(store),
+          }),
           icon: Icons.filter_list,
         ),
     ];
@@ -311,7 +313,7 @@ class _FolderViewState extends State<FolderView> {
       final id = await showSpanSheet<String>(
         context,
         (context) => SheetBody(
-          title: kind == 'project' ? '主页只显示文件夹' : '主页只显示标签',
+          title: kind == 'project' ? tr('主页只显示文件夹') : tr('主页只显示标签'),
           content: [
             Panel(
               dividerIndent: 52,
@@ -434,37 +436,23 @@ class _FolderViewState extends State<FolderView> {
 
       final count = home ? store.rules.length : top.length;
       final emptyHint = searching
-          ? const EmptyState(
-              '没有找到',
-              '按名称和备注搜索，换个关键词试试。',
-              icon: Icons.search_off,
-            )
+          ? EmptyState(tr('没有找到'), icon: Icons.search_off)
           : switch (folder.kind) {
               'home' when store.rules.isEmpty => EmptyState(
-                '还没有规则',
-                '订阅、证件、次卡、保养……\n把需要按时处理的事记在这里。',
+                tr('还没有规则'),
                 icon: Icons.event_note_outlined,
                 action: FilledButton(
                   onPressed: () => openCreator(context, store),
-                  child: const Text('新建规则'),
+                  child: Text(tr('新建规则')),
                 ),
               ),
               'home' => const SizedBox.shrink(),
-              'project' => const EmptyState(
-                '文件夹是空的',
-                '在这里新建规则，或在规则菜单中选择“移动到”。',
+              'project' => EmptyState(
+                tr('文件夹是空的'),
                 icon: Icons.folder_open_outlined,
               ),
-              'inbox' => const EmptyState(
-                '没有未归类的规则',
-                '其余规则都已放进文件夹。',
-                icon: Icons.inbox_outlined,
-              ),
-              _ => const EmptyState(
-                '这里还没有规则',
-                '新建一条规则开始。',
-                icon: Icons.event_note_outlined,
-              ),
+              'inbox' => EmptyState(tr('没有未归类的规则')),
+              _ => EmptyState(tr('这里还没有规则'), icon: Icons.event_note_outlined),
             };
 
       final layout = homeLayout(store);
@@ -474,14 +462,14 @@ class _FolderViewState extends State<FolderView> {
       final menu = home
           ? PopupMenuButton<String>(
               key: const ValueKey('home-menu'),
-              tooltip: '主页显示',
+              tooltip: tr('主页显示'),
               icon: const Icon(Icons.more_horiz_rounded),
               onSelected: chooseHomeLayout,
               itemBuilder: (_) => [
                 for (final (value, label) in [
-                  ('due', '全部规则，按到期时间'),
-                  ('project', '按文件夹分组'),
-                  ('tag', '按标签分组'),
+                  ('due', tr('全部规则，按到期时间')),
+                  ('project', tr('按文件夹分组')),
+                  ('tag', tr('按标签分组')),
                 ])
                   CheckedPopupMenuItem(
                     value: value,
@@ -495,8 +483,8 @@ class _FolderViewState extends State<FolderView> {
                   enabled: store.projects.isNotEmpty,
                   child: Text(
                     only('project') == null
-                        ? '只看一个文件夹…'
-                        : '只看：${only('project')}',
+                        ? tr('只看一个文件夹…')
+                        : tr('只看：{place}', {'place': only('project')}),
                   ),
                 ),
                 CheckedPopupMenuItem(
@@ -504,14 +492,16 @@ class _FolderViewState extends State<FolderView> {
                   checked: only('tag') != null,
                   enabled: store.tags.isNotEmpty,
                   child: Text(
-                    only('tag') == null ? '只看一个标签…' : '只看：${only('tag')}',
+                    only('tag') == null
+                        ? tr('只看一个标签…')
+                        : tr('只看：{place}', {'place': only('tag')}),
                   ),
                 ),
               ],
             )
           : PopupMenuButton<String>(
               key: const ValueKey('entries-menu'),
-              tooltip: '更多',
+              tooltip: tr('更多'),
               icon: const Icon(Icons.more_horiz_rounded),
               onSelected: (value) async {
                 final sort = store.setting('sort', 'manual');
@@ -546,13 +536,13 @@ class _FolderViewState extends State<FolderView> {
                 return [
                   menuItem(
                     'select',
-                    '选择',
+                    tr('选择'),
                     Icons.check_circle_outline,
                     enabled: top.any((e) => !e.containsKey('accounts')),
                   ),
                   menuItem(
                     'reorder',
-                    '调整顺序',
+                    tr('调整顺序'),
                     Icons.swap_vert,
                     enabled: top.length > 1,
                   ),
@@ -571,7 +561,7 @@ class _FolderViewState extends State<FolderView> {
                   if (sort != 'manual')
                     menuItem(
                       'direction',
-                      descending ? '改为由近到远' : '改为由远到近',
+                      descending ? tr('改为由近到远') : tr('改为由远到近'),
                       descending ? Icons.north : Icons.south,
                     ),
                   if (folder.kind == 'project' || folder.kind == 'tag')
@@ -579,11 +569,11 @@ class _FolderViewState extends State<FolderView> {
                   if (folder.kind == 'project')
                     menuItem(
                       'rename',
-                      '重命名文件夹',
+                      tr('重命名文件夹'),
                       Icons.drive_file_rename_outline,
                     ),
                   if (folder.kind == 'tag')
-                    menuItem('tag', '编辑标签', Icons.sell_outlined),
+                    menuItem('tag', tr('编辑标签'), Icons.sell_outlined),
                 ];
               },
             );
@@ -605,7 +595,9 @@ class _FolderViewState extends State<FolderView> {
                   if (store.rules.isNotEmpty) ...[
                     const TextSpan(text: ' · '),
                     TextSpan(
-                      text: attention == 0 ? '暂无需要处理的事项' : '$attention 项需要处理',
+                      text: attention == 0
+                          ? tr('暂无需要处理的事项')
+                          : tr('{n} 项需要处理', {'n': attention}),
                       style: attention == 0
                           ? null
                           : TextStyle(
@@ -627,16 +619,22 @@ class _FolderViewState extends State<FolderView> {
       final toolbar = switch (mode) {
         Mode.browse when !widget.standalone => null,
         Mode.browse => SpanToolbar(
-          center: Text(home ? '${store.rules.length} 条规则' : '$count 项'),
+          center: Text(
+            home
+                ? tr('{n} 条规则', {'n': store.rules.length})
+                : tr('{n} 项', {'n': count}),
+          ),
         ),
         Mode.select => SpanToolbar(
           key: const ValueKey('select-bar'),
           leading: TextButton(
             onPressed: () => setMode(Mode.browse),
-            child: const Text('取消'),
+            child: Text(tr('取消')),
           ),
           center: Text(
-            selected.isEmpty ? '选择要合并的规则' : '已选 ${selected.length} 条',
+            selected.isEmpty
+                ? tr('选择要合并的规则')
+                : tr('已选 {n} 条', {'n': selected.length}),
           ),
           trailing: TextButton(
             key: const ValueKey('merge-selected'),
@@ -651,20 +649,21 @@ class _FolderViewState extends State<FolderView> {
                     if (merged && mounted) setMode(Mode.browse);
                   }),
             child: Text(
-              selected.length < 2 ? '合并' : '合并 ${selected.length}',
+              selected.length < 2
+                  ? tr('合并')
+                  : tr('合并 {n}', {'n': selected.length}),
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
         ),
         Mode.reorder => SpanToolbar(
           key: const ValueKey('reorder-bar'),
-          center: const Text('拖动或用箭头调整顺序'),
           trailing: TextButton(
             key: const ValueKey('reorder-done'),
             onPressed: () => setMode(Mode.browse),
-            child: const Text(
-              '完成',
-              style: TextStyle(fontWeight: FontWeight.w700),
+            child: Text(
+              tr('完成'),
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
         ),
@@ -688,12 +687,12 @@ class _FolderViewState extends State<FolderView> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip: '上移',
+                  tooltip: tr('上移'),
                   onPressed: index > 0 ? () => reorder(index, index - 1) : null,
                   icon: const Icon(Icons.arrow_upward, size: 18),
                 ),
                 IconButton(
-                  tooltip: '下移',
+                  tooltip: tr('下移'),
                   onPressed: index + 1 < top.length
                       ? () => reorder(index, index + 1)
                       : null,
@@ -702,7 +701,7 @@ class _FolderViewState extends State<FolderView> {
                 ReorderableDragStartListener(
                   index: index,
                   child: Tooltip(
-                    message: '拖动排序',
+                    message: tr('拖动排序'),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(4, 10, 14, 10),
                       child: Icon(Icons.drag_handle, color: colors.muted),
@@ -761,9 +760,9 @@ class _FolderViewState extends State<FolderView> {
           if (mode == Mode.select)
             TextButton(
               onPressed: () => setMode(Mode.browse),
-              child: const Text(
-                '完成',
-                style: TextStyle(fontWeight: FontWeight.w700),
+              child: Text(
+                tr('完成'),
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             )
           else if (mode == Mode.browse)
@@ -777,13 +776,13 @@ class _FolderViewState extends State<FolderView> {
               SearchField(
                 key: const ValueKey('entry-search'),
                 controller: search,
-                hint: home ? '搜索全部规则' : '搜索',
+                hint: home ? tr('搜索全部规则') : tr('搜索'),
                 onChanged: (v) => setState(() => query = v),
               ),
             if (!home && !reordering && top.isNotEmpty)
               const SizedBox(height: 12),
             if (home && searching && results.isNotEmpty)
-              SectionHeader('搜索结果', note: '${results.length}'),
+              SectionHeader(tr('搜索结果'), note: '${results.length}'),
             if (reordering) const SizedBox(height: 12),
             ...homeChildren,
             if (empty) emptyHint,
@@ -804,10 +803,10 @@ class _FolderViewState extends State<FolderView> {
 }
 
 String sortLabel(String value) => switch (value) {
-  'manual' => '手动排序',
-  'reminder' => '按下一次提醒',
-  'event' => '按下一次事件',
-  'remaining' => '按剩余有效期',
+  'manual' => tr('手动排序'),
+  'reminder' => tr('按下一次提醒'),
+  'event' => tr('按下一次事件'),
+  'remaining' => tr('按剩余有效期'),
   _ => value,
 };
 
@@ -845,7 +844,7 @@ class ProjectsPage extends StatelessWidget {
         child: ValueRow(name, icon: icon, value: '$count', chevron: true),
       );
       return SpanPage(
-        title: '项目',
+        title: tr('项目'),
         titleKey: const ValueKey('page-projects'),
         floatingActionButton: AddButton(
           key: const ValueKey('create-rule'),
@@ -858,18 +857,18 @@ class ProjectsPage extends StatelessWidget {
             row(
               Folder.all,
               Icons.format_list_bulleted,
-              '全部规则',
+              tr('全部规则'),
               store.rules.length,
               first: true,
             ),
             row(
               Folder.inbox,
               Icons.inbox_outlined,
-              '未归类',
+              tr('未归类'),
               counts[null] ?? 0,
               last: true,
             ),
-            const SectionHeader('文件夹', large: false),
+            SectionHeader(tr('文件夹'), large: false),
             for (final p in store.projects)
               row(
                 Folder.project(p['id'] as String),
@@ -882,11 +881,11 @@ class ProjectsPage extends StatelessWidget {
                     context,
                     position,
                     title: p['name'] as String,
-                    sections: const [
+                    sections: [
                       [
                         MenuAction(
                           'rename',
-                          '重命名',
+                          tr('重命名'),
                           Icons.drive_file_rename_outline,
                         ),
                       ],
@@ -904,13 +903,13 @@ class ProjectsPage extends StatelessWidget {
               indent: 52,
               onTap: () => createProject(context, store),
               child: ValueRow(
-                '新建文件夹',
+                tr('新建文件夹'),
                 icon: Icons.create_new_folder_outlined,
                 color: theme.colorScheme.primary,
               ),
             ),
             if (store.tags.isNotEmpty) ...[
-              const SectionHeader('标签', large: false),
+              SectionHeader(tr('标签'), large: false),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Wrap(
@@ -927,7 +926,6 @@ class ProjectsPage extends StatelessWidget {
                   ],
                 ),
               ),
-              const SectionFooter('点按查看相关规则，长按编辑标签。'),
             ],
           ]),
         ],
@@ -986,12 +984,12 @@ class _TagPill extends StatelessWidget {
 
 /// Asks first: a cancelled dialog writes nothing and reports nothing.
 Future<void> createProject(BuildContext context, SpanStore store) async {
-  final name = await askText(context, '新建文件夹', action: '创建');
+  final name = await askText(context, tr('新建文件夹'), action: tr('创建'));
   if (name == null || !context.mounted) return;
   await perform(
     context,
     () => store.mutate('save_project', {'name': name}),
-    success: '已创建文件夹',
+    success: tr('已创建文件夹'),
   );
 }
 
@@ -1000,9 +998,9 @@ Future<void> renameProject(BuildContext context, SpanStore store, String id) =>
       final baseRevision = store.revision;
       final name = await askText(
         context,
-        '重命名文件夹',
+        tr('重命名文件夹'),
         initial: store.state['projects'][id]['name'] as String,
-        action: '保存',
+        action: tr('保存'),
       );
       if (name != null) {
         await store.mutate('save_project', {
@@ -1039,7 +1037,7 @@ Future<bool> mergeDialog(
   String? project = store.state['rules'][ids.first]['project'] as String?;
   bool approved = false;
   String projectName(String? id) =>
-      id == null ? '未归类' : store.state['projects'][id]['name'] as String;
+      id == null ? tr('未归类') : store.state['projects'][id]['name'] as String;
   final result = await showDialog<Json>(
     context: context,
     builder: (context) => TextControllerScope(
@@ -1051,7 +1049,10 @@ Future<bool> mergeDialog(
             (b) => b['conflict'] == true && !choices.containsKey(b['unit_key']),
           );
           return AlertDialog(
-            title: Text('合并 ${ids.length} 条规则', textAlign: TextAlign.center),
+            title: Text(
+              tr('合并 {n} 条规则', {'n': ids.length}),
+              textAlign: TextAlign.center,
+            ),
             content: SingleChildScrollView(
               child: SizedBox(
                 width: 480,
@@ -1060,20 +1061,20 @@ Future<bool> mergeDialog(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      '各规则的周期、提醒和历史保持独立；单位相同的资源共用一个账户，余额只保留一份，不相加。',
+                      tr('单位相同的资源共用一个账户，余额只保留一份，不相加。'),
                       style: theme.textTheme.bodySmall,
                     ),
                     const SizedBox(height: 14),
                     TextField(
                       controller: name,
-                      decoration: const InputDecoration(hintText: '合并后的名称'),
+                      decoration: InputDecoration(hintText: tr('合并后的名称')),
                     ),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
                       initialValue: project ?? '',
-                      decoration: const InputDecoration(labelText: '放在'),
+                      decoration: InputDecoration(labelText: tr('放在')),
                       items: [
-                        const DropdownMenuItem(value: '', child: Text('未归类')),
+                        DropdownMenuItem(value: '', child: Text(tr('未归类'))),
                         for (final p in store.projects)
                           DropdownMenuItem(
                             value: p['id'] as String,
@@ -1089,10 +1090,10 @@ Future<bool> mergeDialog(
                       const SizedBox(height: 16),
                       Text(
                         bucket['conflict'] == true
-                            ? '余额不同，请选择保留哪一份'
+                            ? tr('余额不同，请选择保留哪一份')
                             : (bucket['accounts'] as List).length > 1
-                            ? '余额相同，只保留一份'
-                            : '共享资源账户',
+                            ? tr('余额相同，只保留一份')
+                            : tr('共享资源账户'),
                         style: theme.textTheme.titleSmall?.copyWith(
                           color: bucket['conflict'] == true
                               ? warningColor(context)
@@ -1113,7 +1114,7 @@ Future<bool> mergeDialog(
                           ),
                           title: Text(ac['name'] as String),
                           trailing: Text(
-                            '${ac['formatted']} ${ac['unit']['code']}',
+                            '${ac['formatted']} ${unitLabel(ac['unit']['code'])}',
                             style: const TextStyle(fontFeatures: tabular),
                           ),
                           onTap: () => setState(
@@ -1126,7 +1127,7 @@ Future<bool> mergeDialog(
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          '未选中的账户归档为历史证据，不计入共享余额。',
+                          tr('未选中的账户归档为历史证据，不计入共享余额。'),
                           style: theme.textTheme.bodySmall,
                         ),
                       ),
@@ -1136,8 +1137,11 @@ Future<bool> mergeDialog(
                         child: CheckboxListTile(
                           contentPadding: EdgeInsets.zero,
                           value: approved,
-                          title: Text('把所有成员移到「${projectName(project)}」'),
-                          subtitle: const Text('成员目前位于不同位置'),
+                          title: Text(
+                            tr('把所有成员移到「{place}」', {
+                              'place': projectName(project),
+                            }),
+                          ),
                           onChanged: (v) => setState(() => approved = v!),
                         ),
                       ),
@@ -1148,7 +1152,7 @@ Future<bool> mergeDialog(
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('取消'),
+                child: Text(tr('取消')),
               ),
               FilledButton(
                 onPressed: (needsConfirmation(project) && !approved) || missing
@@ -1160,7 +1164,7 @@ Future<bool> mergeDialog(
                         'choices': choices,
                         'confirm_project': approved,
                       }),
-                child: const Text('确认合并'),
+                child: Text(tr('确认合并')),
               ),
             ],
           );
@@ -1170,6 +1174,8 @@ Future<bool> mergeDialog(
   );
   if (result == null) return false;
   await store.mutate('merge', result, baseRevision: baseRevision);
-  if (context.mounted) notify(context, '已合并为「${result['name']}」');
+  if (context.mounted) {
+    notify(context, tr('已合并为「{name}」', {'name': result['name']}));
+  }
   return true;
 }

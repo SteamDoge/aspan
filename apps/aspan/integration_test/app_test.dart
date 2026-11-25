@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:aspan/app.dart';
 import 'package:aspan/data.dart';
+import 'package:aspan/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +14,9 @@ import 'package:integration_test/integration_test.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  // These flows assert Simplified Chinese text; "follow system" resolves to
+  // it regardless of the device language.
+  debugSystemLocales = const [Locale('zh', 'CN')];
   final output = Platform.environment['ASPAN_TEST_OUTPUT'];
 
   Future<void> capture(GlobalKey boundary, String name) async {

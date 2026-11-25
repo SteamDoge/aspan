@@ -10,7 +10,16 @@ import 'package:flutter/services.dart';
 import 'data.dart';
 import 'design.dart';
 
-const _sceneOrder = ['订阅缴费', '日常与纪念日', '检查维护', '资源权益', '有效期'];
+// Scene values in assets/templates.json, in display order; shown through tr.
+const _sceneOrder = ['订阅缴费', '日常与纪念日', '检查维护', '资源权益', '有效期']; // l10n-keep
+
+/// The unit code of count accounts. It is stored data, so it stays the same
+/// in every language; [unitLabel] translates it for display.
+const countUnit = '次'; // l10n-keep
+
+/// Preset texts in assets/templates.json are Simplified Chinese catalog keys;
+/// a rule created from a preset takes them in the current language.
+String? _presetText(Object? text) => text == null ? null : tr(text as String);
 
 Json presetConfig(Json t) {
   final next = dateOnly(
@@ -18,9 +27,11 @@ Json presetConfig(Json t) {
   );
   final kind =
       t['resource'] as String? ?? (t['money'] == true ? 'money' : null);
+  final name = _presetText(t['name']);
   return <String, dynamic>{
-    'name': t['name'],
+    'name': name,
     'icon': t['icon'],
+    // Shown through tr by the editor, so it follows a language switch.
     if (t['guidance'] != null) 'guidance': t['guidance'],
     'reminder': {
       'before': t['before'] ?? [7, 1],
@@ -36,14 +47,14 @@ Json presetConfig(Json t) {
       },
     if (kind != null)
       'new_account': {
-        'name': t['name'],
+        'name': name,
         'unit': {
           'kind': kind,
           'code': kind == 'money'
               ? 'CNY'
               : kind == 'count'
-              ? '次'
-              : t['unit'] ?? '单位',
+              ? countUnit
+              : _presetText(t['unit']) ?? tr('单位'),
           'precision': kind == 'count' ? 0 : 2,
         },
         'initial': t['initial'] ?? '0',
@@ -54,17 +65,23 @@ Json presetConfig(Json t) {
   };
 }
 
+/// A saved template's rule config; it keeps the dates it was saved with.
+Json templateConfig(Json t) =>
+    object(t['config'])
+      ..['guidance'] = tr('来自我的模板「{name}」：请核对本期日期与起算日。', {'name': t['name']});
+
 /// Short, factual description of what a preset or saved template enables.
 String configSummary(Json c) {
   final schedule = c['schedule'] as Map?;
   final account = c['new_account'] as Map?;
   final kind = account?['unit']?['kind'];
   return [
-    schedule == null ? '无周期' : cycleLabel(object(schedule['cycle'])),
-    if (kind == 'money') '金额 ${account!['unit']['code']}',
-    if (kind == 'count') '次数',
-    if (kind == 'quantity') '额度 ${account!['unit']['code']}',
-    if (c['reset'] != null) '每期恢复额度',
+    schedule == null ? tr('无周期') : cycleLabel(object(schedule['cycle'])),
+    if (kind == 'money') tr('金额 {unit}', {'unit': account!['unit']['code']}),
+    if (kind == 'count') tr('次数'),
+    if (kind == 'quantity')
+      tr('额度 {unit}', {'unit': unitLabel(account!['unit']['code'])}),
+    if (c['reset'] != null) tr('每期恢复额度'),
   ].join(' · ');
 }
 
@@ -111,7 +128,7 @@ class TemplatePicker extends StatelessWidget {
     final theme = Theme.of(context);
     final scenes = <String, List<Json>>{};
     for (final t in official) {
-      (scenes[t['scene'] as String? ?? '其他'] ??= []).add(t);
+      (scenes[t['scene'] as String? ?? tr('其他')] ??= []).add(t);
     }
     final order = [
       ..._sceneOrder.where(scenes.containsKey),
@@ -139,7 +156,7 @@ class TemplatePicker extends StatelessWidget {
         ),
         children: [
           Text(
-            '新建规则',
+            tr('新建规则'),
             textAlign: TextAlign.center,
             style: theme.textTheme.titleLarge,
           ),
@@ -147,7 +164,7 @@ class TemplatePicker extends StatelessWidget {
           Panel(
             children: [
               ValueRow(
-                '空白规则',
+                tr('空白规则'),
                 key: const ValueKey('blank-rule'),
                 icon: Icons.add,
                 onTap: () => Navigator.pop(context, <String, dynamic>{}),
@@ -155,7 +172,7 @@ class TemplatePicker extends StatelessWidget {
             ],
           ),
           if (custom.isNotEmpty) ...[
-            const SectionHeader('我的模板', large: false),
+            SectionHeader(tr('我的模板'), large: false),
             Panel(
               dividerIndent: 64,
               children: [
@@ -164,34 +181,26 @@ class TemplatePicker extends StatelessWidget {
                     Icons.bookmark_outline,
                     t['name'] as String,
                     configSummary(object(t['config'])),
-                    () => Navigator.pop(
-                      context,
-                      object(t['config'])
-                        ..['guidance'] =
-                            '来自我的模板「${t['name']}」：模板保留保存时的日期，请核对本期日期与起算日。',
-                    ),
+                    () => Navigator.pop(context, templateConfig(t)),
                   ),
               ],
             ),
-            const SectionFooter('模板保留保存时的日期，使用时请核对。'),
           ],
           for (final scene in order) ...[
-            SectionHeader(scene, large: false),
+            SectionHeader(tr(scene), large: false),
             Panel(
               dividerIndent: 64,
               children: [
                 for (final t in scenes[scene]!)
                   option(
                     ruleIcon(t['icon'] as String?),
-                    t['name'] as String,
-                    t['description'] as String? ??
-                        configSummary(presetConfig(t)),
+                    tr(t['name'] as String),
+                    configSummary(presetConfig(t)),
                     () => Navigator.pop(context, presetConfig(t)),
                   ),
               ],
             ),
           ],
-          const SectionFooter('模板只预填内容，创建的都是普通规则，之后都能修改。'),
         ],
       ),
     );
@@ -208,15 +217,15 @@ String formatUnits(int value, int precision) {
   return '${value < 0 ? '-' : ''}${precision == 0 ? raw : '${raw.substring(0, raw.length - precision)}.${raw.substring(raw.length - precision)}'}';
 }
 
-const _cycles = [
-  ('once', '单次'),
-  ('daily', '每日'),
-  ('weekly', '每周'),
-  ('monthly', '每月'),
-  ('yearly', '每年'),
-  ('interval', '每隔 N 天'),
-  ('restart', '完成后重新计时'),
-  ('calendar', '指定日期'),
+List<(String, String)> get _cycles => [
+  ('once', tr('单次')),
+  ('daily', tr('每日')),
+  ('weekly', tr('每周')),
+  ('monthly', tr('每月')),
+  ('yearly', tr('每年')),
+  ('interval', tr('每隔 N 天')),
+  ('restart', tr('完成后重新计时')),
+  ('calendar', tr('指定日期')),
 ];
 
 class RuleEditor extends StatefulWidget {
@@ -346,21 +355,23 @@ class _RuleEditorState extends State<RuleEditor> {
       : kind == 'money'
       ? unit
       : kind == 'count'
-      ? '次'
+      ? countUnit
       : field('unit').text.trim();
 
   String? validate(String key, String label, String? value, bool required) {
     final text = value?.trim() ?? '';
-    if (required && text.isEmpty) return '请填写$label';
+    if (required && text.isEmpty) return tr('请填写{label}', {'label': label});
     if (['precision', 'days', 'grace', 'repeat'].contains(key) &&
         text.isNotEmpty) {
       final n = int.tryParse(text);
       final min = key == 'days' || key == 'repeat' ? 1 : 0;
       final max = key == 'precision' ? 6 : 36500;
-      if (n == null || n < min || n > max) return '请输入 $min—$max 之间的整数';
+      if (n == null || n < min || n > max) {
+        return tr('请输入 {min}—{max} 之间的整数', {'min': min, 'max': max});
+      }
     }
     if (key == 'amount' && text.startsWith(RegExp(r'[-+]'))) {
-      return '只填数值，方向由上方选项决定';
+      return tr('只填数值，方向由上方选项决定');
     }
     return null;
   }
@@ -397,7 +408,7 @@ class _RuleEditorState extends State<RuleEditor> {
                   : TextInputType.text,
               style: theme.textTheme.bodyLarge?.copyWith(fontFeatures: tabular),
               decoration: _bare.copyWith(
-                hintText: hint ?? (required ? '必填' : '可选'),
+                hintText: hint ?? (required ? tr('必填') : tr('可选')),
                 suffixText: suffix,
               ),
               validator: (value) => validate(key, label, value, required),
@@ -470,7 +481,7 @@ class _RuleEditorState extends State<RuleEditor> {
     final selectedUnit = kind == 'money'
         ? unit
         : kind == 'count'
-        ? '次'
+        ? countUnit
         : field('unit').text.trim();
     final p = kind == 'count'
         ? 0
@@ -538,7 +549,7 @@ class _RuleEditorState extends State<RuleEditor> {
 
   Future<void> save() async {
     if (!form.currentState!.validate()) {
-      setState(() => error = '请检查标出的内容');
+      setState(() => error = tr('请检查标出的内容'));
       return;
     }
     setState(() {
@@ -551,7 +562,12 @@ class _RuleEditorState extends State<RuleEditor> {
       await widget.store.mutate('save_rule', value, baseRevision: baseRevision);
       saved = true;
       if (mounted) {
-        notify(context, widget.editing ? '已保存修改' : '已创建「${value['name']}」');
+        notify(
+          context,
+          widget.editing
+              ? tr('已保存修改')
+              : tr('已创建「{name}」', {'name': value['name']}),
+        );
         Navigator.pop(context);
       }
     } catch (e) {
@@ -564,9 +580,9 @@ class _RuleEditorState extends State<RuleEditor> {
   Future<void> leave() async {
     if (await confirm(
           context,
-          '放弃未保存的修改？',
-          '离开后，本次填写的内容不会保存。',
-          action: '放弃',
+          tr('放弃未保存的修改？'),
+          tr('离开后，本次填写的内容不会保存。'),
+          action: tr('放弃'),
           destructive: true,
         ) &&
         mounted) {
@@ -597,16 +613,16 @@ class _RuleEditorState extends State<RuleEditor> {
   Future<void> addReminderDay() async {
     final value = await askText(
       context,
-      '提前几天提醒',
-      label: '天数',
-      helper: '0—36500 的整数；0 表示事件当天',
+      tr('提前几天提醒'),
+      label: tr('天数'),
+      helper: tr('0—36500 的整数；0 表示事件当天'),
       keyboard: TextInputType.number,
-      action: '添加',
+      action: tr('添加'),
     );
     final n = int.tryParse(value ?? '');
     if (value == null) return;
     if (n == null || n < 0 || n > 36500) {
-      if (mounted) notify(context, '提醒天数须为 0—36500 的整数');
+      if (mounted) notify(context, tr('提醒天数须为 0—36500 的整数'));
       return;
     }
     update(() {
@@ -617,7 +633,7 @@ class _RuleEditorState extends State<RuleEditor> {
 
   Future<void> createTag() async {
     final store = widget.store;
-    final name = await askText(context, '新建标签', action: '创建');
+    final name = await askText(context, tr('新建标签'), action: tr('创建'));
     if (name == null || !mounted) return;
     final revision = store.revision;
     await perform(context, () async {
@@ -643,7 +659,7 @@ class _RuleEditorState extends State<RuleEditor> {
     final (addVerb, consumeVerb) = resourceVerbs(kind);
     final children = <Widget>[
       if (widget.initial['guidance'] != null) ...[
-        Callout(widget.initial['guidance'] as String),
+        Callout(tr(widget.initial['guidance'] as String)),
         const SizedBox(height: 12),
       ],
       if (error != null) ...[
@@ -663,10 +679,10 @@ class _RuleEditorState extends State<RuleEditor> {
             style: theme.textTheme.titleLarge?.copyWith(fontSize: 20),
             textInputAction: TextInputAction.next,
             decoration: _bare.copyWith(
-              hintText: '名称',
+              hintText: tr('名称'),
               contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
             ),
-            validator: (value) => validate('name', '名称', value, true),
+            validator: (value) => validate('name', tr('名称'), value, true),
           ),
           TextFormField(
             key: const ValueKey('field-notes'),
@@ -675,28 +691,28 @@ class _RuleEditorState extends State<RuleEditor> {
             maxLines: 8,
             style: theme.textTheme.bodyLarge,
             decoration: _bare.copyWith(
-              hintText: '备注',
+              hintText: tr('备注'),
               contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
             ),
           ),
         ],
       ),
 
-      const SectionHeader('日期', large: false),
+      SectionHeader(tr('日期'), large: false),
       Panel(
         children: [
           SwitchRow(
-            '按日期管理',
+            tr('按日期管理'),
             switchKey: const ValueKey('toggle-timed'),
             value: timed,
             onChanged: (v) => update(() => timed = v),
           ),
           if (timed) ...[
             ValueRow(
-              '本期事件日期',
+              tr('本期事件日期'),
               key: const ValueKey('next-date'),
               value: ended
-                  ? '周期已结束'
+                  ? tr('周期已结束')
                   : '${friendlyDate(next, weekday: false)} · ${relativeDays(daysToNext)}',
               valueColor: ended ? null : theme.colorScheme.primary,
               chevron: false,
@@ -704,18 +720,24 @@ class _RuleEditorState extends State<RuleEditor> {
             ),
             choice<String>(
               key: const ValueKey('cycle-menu'),
-              label: '重复',
+              label: tr('重复'),
               value: cycle,
               options: _cycles,
               itemKey: (v) => 'cycle-$v',
               onSelected: (v) => update(() => cycle = v),
             ),
             if (cycle == 'interval' || cycle == 'restart')
-              input('days', '间隔', numeric: true, required: true, suffix: '天'),
+              input(
+                'days',
+                tr('间隔'),
+                numeric: true,
+                required: true,
+                suffix: tr('天'),
+              ),
             if (cycle == 'calendar')
-              input('dates', '日期列表', hint: 'YYYY-MM-DD，逗号分隔'),
+              input('dates', tr('日期列表'), hint: tr('YYYY-MM-DD，逗号分隔')),
             ValueRow(
-              '起算日',
+              tr('起算日'),
               key: const ValueKey('start-date'),
               value: friendlyDate(start),
               valueColor: theme.colorScheme.primary,
@@ -725,34 +747,24 @@ class _RuleEditorState extends State<RuleEditor> {
           ],
         ],
       ),
-      SectionFooter(
-        !timed
-            ? '关闭后只记录资源与历史。'
-            : ended
-            ? '点按日期重新安排；只改名称等信息不会产生新的一期。'
-            : switch (cycle) {
-                'once' => '只发生一次，完成后结束。起算日用于计算进度。',
-                'restart' => '下一期从实际完成日期起算，适合充值保活、定期更换。',
-                'monthly' => '按自然月推进；月末日期在短月取当月最后一天。',
-                'yearly' => '按自然年推进；2 月 29 日在非闰年按 2 月末处理。',
-                'calendar' => '按列表中的日期依次推进，第一个日期应与本期日期一致。',
-                _ => '按计划日期推进，晚确认不会改变原周期。',
-              },
-      ),
+      if (timed && ended)
+        SectionFooter(tr('点按日期重新安排。'))
+      else if (timed && cycle == 'calendar')
+        SectionFooter(tr('第一个日期应与本期日期一致。')),
       if (timed && !ended && daysToNext < 0) ...[
         const SizedBox(height: 10),
         Callout(
-          '日期早于今天，保存后会立即显示为逾期或处理窗口。',
+          tr('日期早于今天，保存后会立即显示为逾期或处理窗口。'),
           icon: Icons.warning_amber_rounded,
           color: warningColor(context),
         ),
       ],
 
       if (timed) ...[
-        const SectionHeader('提醒', large: false),
+        SectionHeader(tr('提醒'), large: false),
         Panel(
           children: [
-            chips('提前提醒', [
+            chips(tr('提前提醒'), [
               for (final n in ({
                 30,
                 14,
@@ -764,7 +776,7 @@ class _RuleEditorState extends State<RuleEditor> {
                 FilterChip(
                   key: ValueKey('before-$n'),
                   label: SpanChipLabel(
-                    n == 0 ? '当天' : '$n 天',
+                    n == 0 ? tr('当天') : tr('{n} 天', {'n': n}),
                     selected: before.contains(n),
                   ),
                   selected: before.contains(n),
@@ -775,27 +787,38 @@ class _RuleEditorState extends State<RuleEditor> {
                 ),
               ActionChip(
                 avatar: const Icon(Icons.add, size: 18),
-                label: const Text('自定义'),
+                label: Text(tr('自定义')),
                 onPressed: addReminderDay,
               ),
             ]),
             SwitchRow(
-              '当天提醒',
+              tr('当天提醒'),
               value: onDay,
               onChanged: (v) => update(() => onDay = v),
             ),
-            input('grace', '处理窗口', numeric: true, required: true, suffix: '天'),
-            input('repeat', '窗口内重复', numeric: true, hint: '不重复', suffix: '天'),
+            input(
+              'grace',
+              tr('处理窗口'),
+              numeric: true,
+              required: true,
+              suffix: tr('天'),
+            ),
+            input(
+              'repeat',
+              tr('窗口内重复'),
+              numeric: true,
+              hint: tr('不重复'),
+              suffix: tr('天'),
+            ),
           ],
         ),
-        const SectionFooter('处理窗口是事件之后仍可处理的天数。提醒只在应用内显示，系统通知尚未接入。'),
       ],
 
-      const SectionHeader('资源', large: false),
+      SectionHeader(tr('资源'), large: false),
       Panel(
         children: [
           SwitchRow(
-            '记录余额或次数',
+            tr('记录余额或次数'),
             switchKey: const ValueKey('toggle-resource'),
             value: resource,
             onChanged: (v) => update(() => resource = v),
@@ -804,17 +827,17 @@ class _RuleEditorState extends State<RuleEditor> {
             ValueRow(
               store.state['accounts'][account]['name'] as String,
               value:
-                  '${store.accountView(account!)['formatted']} ${store.accountView(account!)['unit']}',
+                  '${store.accountView(account!)['formatted']} ${unitLabel(store.accountView(account!)['unit'])}',
             ),
           if (resource && account == null) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
               child: SegmentedButton<String>(
                 key: const ValueKey('account-kind'),
-                segments: const [
-                  ButtonSegment(value: 'money', label: Text('金额')),
-                  ButtonSegment(value: 'count', label: Text('次数')),
-                  ButtonSegment(value: 'quantity', label: Text('额度')),
+                segments: [
+                  ButtonSegment(value: 'money', label: Text(tr('金额'))),
+                  ButtonSegment(value: 'count', label: Text(tr('次数'))),
+                  ButtonSegment(value: 'quantity', label: Text(tr('额度'))),
                 ],
                 selected: {kind},
                 showSelectedIcon: false,
@@ -824,7 +847,7 @@ class _RuleEditorState extends State<RuleEditor> {
             if (kind == 'money')
               choice<String>(
                 key: const ValueKey('currency-menu'),
-                label: '币种',
+                label: tr('币种'),
                 value: unit,
                 options: [
                   for (final c
@@ -835,26 +858,26 @@ class _RuleEditorState extends State<RuleEditor> {
                 onSelected: (v) => update(() => unit = v),
               ),
             if (kind == 'quantity') ...[
-              input('unit', '单位', required: true, hint: '如 GB、积分'),
-              input('precision', '小数位数', numeric: true, required: true),
+              input('unit', tr('单位'), required: true, hint: tr('如 GB、积分')),
+              input('precision', tr('小数位数'), numeric: true, required: true),
             ],
             input(
               'initial',
-              '初始余量',
+              tr('初始余量'),
               numeric: true,
               required: true,
-              suffix: unitCode,
+              suffix: unitLabel(unitCode),
             ),
-            input('reference', '参考总量', numeric: true),
-            input('low', '低于时提醒', numeric: true),
+            input('reference', tr('参考总量'), numeric: true),
+            input('low', tr('低于时提醒'), numeric: true),
           ],
           if (resource && timed) ...[
-            chips('每期完成时', [
+            chips(tr('每期完成时'), [
               for (final (value, label) in [
-                ('none', '不记录'),
+                ('none', tr('不记录')),
                 ('consume', consumeVerb),
                 ('add', addVerb),
-                ('reset', '恢复到额度'),
+                ('reset', tr('恢复到额度')),
               ])
                 ChoiceChip(
                   key: ValueKey('change-$value'),
@@ -867,43 +890,36 @@ class _RuleEditorState extends State<RuleEditor> {
               input(
                 'amount',
                 changeMode == 'reset'
-                    ? '恢复到'
-                    : changeMode == 'consume'
-                    ? '每期$consumeVerb'
-                    : '每期$addVerb',
+                    ? tr('恢复到')
+                    : tr('每期{verb}', {
+                        'verb': changeMode == 'consume' ? consumeVerb : addVerb,
+                      }),
                 numeric: true,
                 required: true,
-                suffix: unitCode,
+                suffix: unitLabel(unitCode),
               ),
           ],
         ],
       ),
-      SectionFooter(
-        !resource
-            ? '金额、次数或有单位的额度；只管时间的事项不需要。'
-            : account != null
-            ? '余额在规则详情中调整。'
-            : '参考总量用于显示剩余比例。完成每期时记入实际流水，预测不会改变余额。',
-      ),
 
-      const SectionHeader('整理', large: false),
+      SectionHeader(tr('整理'), large: false),
       Panel(
         children: [
           if (widget.initial['group'] == null)
             choice<String>(
               key: const ValueKey('project-menu'),
-              label: '文件夹',
+              label: tr('文件夹'),
               value: project ?? '',
               options: [
-                ('', '未归类'),
+                ('', tr('未归类')),
                 for (final p in store.projects)
                   (p['id'] as String, p['name'] as String),
               ],
               onSelected: (v) => update(() => project = v == '' ? null : v),
             )
           else
-            const ValueRow('文件夹', value: '随所在合并条目'),
-          chips('标签', [
+            ValueRow(tr('文件夹'), value: tr('随所在合并条目')),
+          chips(tr('标签'), [
             for (final t in store.tags)
               FilterChip(
                 label: SpanChipLabel(
@@ -918,12 +934,12 @@ class _RuleEditorState extends State<RuleEditor> {
             ActionChip(
               key: const ValueKey('create-tag'),
               avatar: const Icon(Icons.add, size: 18),
-              label: Text(store.tags.isEmpty ? '添加标签' : '新标签'),
+              label: Text(store.tags.isEmpty ? tr('添加标签') : tr('新标签')),
               onPressed: createTag,
             ),
           ]),
           SwitchRow(
-            '在主页置顶',
+            tr('在主页置顶'),
             value: pinned,
             onChanged: (v) => update(() => pinned = v),
           ),
@@ -942,9 +958,9 @@ class _RuleEditorState extends State<RuleEditor> {
           leading: TextButton(
             key: const ValueKey('cancel-rule'),
             onPressed: () => Navigator.maybePop(context),
-            child: const Text('取消'),
+            child: Text(tr('取消')),
           ),
-          title: Text(widget.editing ? '编辑规则' : '新建规则'),
+          title: Text(widget.editing ? tr('编辑规则') : tr('新建规则')),
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: 6),
@@ -957,9 +973,9 @@ class _RuleEditorState extends State<RuleEditor> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text(
-                        '保存',
-                        style: TextStyle(fontWeight: FontWeight.w700),
+                    : Text(
+                        tr('保存'),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
               ),
             ),

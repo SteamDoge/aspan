@@ -8,11 +8,12 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'data.dart';
+import 'l10n/l10n.dart';
 
-const backupType = XTypeGroup(
-  label: 'ASpan 备份',
-  extensions: ['json'],
-  mimeTypes: ['application/json'],
+XTypeGroup get backupType => XTypeGroup(
+  label: tr('ASpan 备份'),
+  extensions: const ['json'],
+  mimeTypes: const ['application/json'],
 );
 
 Future<bool> exportBackup(SpanStore store) async {
@@ -68,7 +69,7 @@ Future<T> withBackupFile<T>(
   Future<T> Function(String) use,
 ) async {
   if (await selected.length() > 50 * 1024 * 1024) {
-    throw StateError('备份文件超过 50 MB');
+    throw StateError(tr('备份文件超过 50 MB'));
   }
   final temporary = await Directory.systemTemp.createTemp('aspan-import-');
   try {

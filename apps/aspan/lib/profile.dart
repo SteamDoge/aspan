@@ -22,54 +22,53 @@ class SettingsPage extends StatelessWidget {
       final templates = objects(store.state['templates']);
       final selected = SpanPalette.parse(store.setting('palette', 'lucent'));
       return SpanPage(
-        title: '我的',
+        title: tr('我的'),
         titleKey: const ValueKey('page-profile'),
         maxWidth: 680,
         slivers: [
           boxes([
             // Same order as AQ's 我的: content sections first, then 外观,
             // then the version line.
-            const SectionHeader('整理', large: false),
+            SectionHeader(tr('整理'), large: false),
             Panel(
               dividerIndent: 52,
               children: [
                 ValueRow(
-                  '标签',
+                  tr('标签'),
                   key: const ValueKey('open-tags'),
                   icon: Icons.sell_outlined,
                   value: '${store.tags.length}',
                   onTap: () => push(context, TagManager(store: store)),
                 ),
                 ValueRow(
-                  '我的模板',
+                  tr('我的模板'),
                   icon: Icons.bookmarks_outlined,
                   value: '${templates.length}',
                   onTap: () => push(context, TemplateManager(store: store)),
                 ),
                 ValueRow(
-                  '提醒计划',
+                  tr('提醒计划'),
                   icon: Icons.notifications_none,
                   onTap: () => push(context, ReminderPlanPage(store: store)),
                 ),
               ],
             ),
-            const SectionFooter('提醒计划列出未来 90 天的应用内提醒；系统通知尚未接入。'),
-            const SectionHeader('数据', large: false),
+            SectionHeader(tr('数据'), large: false),
             Panel(
               dividerIndent: 52,
               children: [
                 ValueRow(
-                  '导出完整备份',
+                  tr('导出完整备份'),
                   key: const ValueKey('export-backup'),
                   icon: Icons.ios_share,
                   onTap: () => perform(context, () async {
                     if (await exportBackup(store) && context.mounted) {
-                      notify(context, '备份已导出');
+                      notify(context, tr('备份已导出'));
                     }
                   }),
                 ),
                 ValueRow(
-                  '从备份恢复',
+                  tr('从备份恢复'),
                   key: const ValueKey('restore-backup'),
                   icon: Icons.settings_backup_restore,
                   onTap: () => perform(context, () async {
@@ -81,23 +80,29 @@ class SettingsPage extends StatelessWidget {
                       if (context.mounted &&
                           await confirm(
                             context,
-                            '用此备份替换当前数据？',
-                            '备份包含 ${preview['rules']} 条规则、${preview['accounts']} 个账户、${preview['history']} 条历史。\n\n当前数据将被整体替换；替换前的数据保存在本机检查点（暂无应用内回退入口）。',
-                            action: '替换',
+                            tr('用此备份替换当前数据？'),
+                            tr(
+                              '备份包含 {rules} 条规则、{accounts} 个账户、{history} 条历史。\n\n当前数据将被整体替换。',
+                              {
+                                'rules': preview['rules'],
+                                'accounts': preview['accounts'],
+                                'history': preview['history'],
+                              },
+                            ),
+                            action: tr('替换'),
                             destructive: true,
                           )) {
                         await store.mutate('restore', {
                           'path': path,
                         }, baseRevision: baseRevision);
-                        if (context.mounted) notify(context, '备份已恢复');
+                        if (context.mounted) notify(context, tr('备份已恢复'));
                       }
                     });
                   }),
                 ),
               ],
             ),
-            const SectionFooter('数据只保存在本机。备份包含规则、账户、流水、模板与设置；恢复前会完整校验。'),
-            const SectionHeader('外观', large: false),
+            SectionHeader(tr('外观'), large: false),
             Panel(
               dividerIndent: 52,
               children: [
@@ -106,18 +111,27 @@ class SettingsPage extends StatelessWidget {
                   child: ThemeModeControl(store: store),
                 ),
                 ValueRow(
-                  '颜色主题',
+                  tr('颜色主题'),
                   key: const ValueKey('open-appearance'),
                   icon: Icons.palette_outlined,
                   value: selected.label,
                   onTap: () => push(context, AppearancePage(store: store)),
+                ),
+                ValueRow(
+                  tr('语言'),
+                  key: const ValueKey('open-language'),
+                  icon: Icons.translate,
+                  value: languageName(
+                    AppLanguage.parse(store.setting('language', 'system')),
+                  ),
+                  onTap: () => chooseLanguage(context, store),
                 ),
               ],
             ),
             const SizedBox(height: 20),
             Semantics(
               button: true,
-              label: '关于 ASpan',
+              label: tr('关于 ASpan'),
               child: InkWell(
                 key: const ValueKey('about'),
                 borderRadius: BorderRadius.circular(10),
@@ -131,12 +145,16 @@ class SettingsPage extends StatelessWidget {
                     size: 36,
                   ),
                   children: [
-                    const Text(
-                      '还剩多少时间、还剩多少资源、什么时候需要处理，以及过去发生了什么。\n\n当前版本：纯日期与本地记录可用，系统通知和时刻/时区尚未实现。',
+                    Text(
+                      tr(
+                        '还剩多少时间、还剩多少资源、什么时候需要处理，以及过去发生了什么。\n\n当前版本：纯日期与本地记录可用，系统通知和时刻/时区尚未实现。',
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    const SelectableText(
-                      '构建源码：${String.fromEnvironment('ASPAN_COMMIT', defaultValue: '开发工作区')}',
+                    SelectableText(
+                      tr('构建源码：{commit}', {
+                        'commit': _commit.isEmpty ? tr('开发工作区') : _commit,
+                      }),
                     ),
                   ],
                 ),
@@ -145,20 +163,10 @@ class SettingsPage extends StatelessWidget {
                   child: ExcludeSemantics(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'ASpan  $releaseVersion',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodySmall,
-                          ),
-                          Text(
-                            '本机数据 · 无需登录 · 可离线使用',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
+                      child: Text(
+                        'ASpan  $releaseVersion',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall,
                       ),
                     ),
                   ),
@@ -172,6 +180,52 @@ class SettingsPage extends StatelessWidget {
   );
 }
 
+const _commit = String.fromEnvironment('ASPAN_COMMIT');
+
+/// Languages are listed by their own names so anyone can find theirs.
+String languageName(AppLanguage language) => switch (language) {
+  AppLanguage.system => tr('跟随系统'),
+  AppLanguage.zhHans => UiLanguage.zhHans.nativeName,
+  AppLanguage.en => UiLanguage.en.nativeName,
+  AppLanguage.zhHant => UiLanguage.zhHant.nativeName,
+};
+
+/// Saved like the theme; the app applies it when the store reports the change.
+Future<void> chooseLanguage(BuildContext context, SpanStore store) async {
+  final current = AppLanguage.parse(store.setting('language', 'system'));
+  final choice = await showSpanSheet<AppLanguage>(
+    context,
+    (context) => SheetBody(
+      title: tr('语言'),
+      content: [
+        Panel(
+          children: [
+            for (final language in AppLanguage.values)
+              ValueRow(
+                languageName(language),
+                key: ValueKey('language-${language.code}'),
+                chevron: false,
+                trailing: language == current
+                    ? Icon(
+                        Icons.check,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.primary,
+                      )
+                    : null,
+                onTap: () => Navigator.pop(context, language),
+              ),
+          ],
+        ),
+      ],
+    ),
+  );
+  if (choice == null || choice == current || !context.mounted) return;
+  await perform(
+    context,
+    () => store.mutate('setting', {'key': 'language', 'value': choice.code}),
+  );
+}
+
 /// The light/dark choice as one full-width segmented control, worded and
 /// laid out as in AQ.
 class ThemeModeControl extends StatelessWidget {
@@ -182,10 +236,10 @@ class ThemeModeControl extends StatelessWidget {
     width: double.infinity,
     child: SegmentedButton<String>(
       key: const ValueKey('theme-mode'),
-      segments: const [
-        ButtonSegment(value: 'system', label: Text('跟随系统')),
-        ButtonSegment(value: 'light', label: Text('浅色')),
-        ButtonSegment(value: 'dark', label: Text('深色')),
+      segments: [
+        ButtonSegment(value: 'system', label: Text(tr('跟随系统'))),
+        ButtonSegment(value: 'light', label: Text(tr('浅色'))),
+        ButtonSegment(value: 'dark', label: Text(tr('深色'))),
       ],
       selected: {store.setting('theme', 'system')},
       showSelectedIcon: false,
@@ -208,13 +262,13 @@ class AppearancePage extends StatelessWidget {
     builder: (context, _) {
       final selected = SpanPalette.parse(store.setting('palette', 'lucent'));
       return SpanPage(
-        title: '外观',
+        title: tr('外观'),
         maxWidth: 640,
         slivers: [
           boxes([
-            const SectionHeader('明暗', large: false),
+            SectionHeader(tr('明暗'), large: false),
             ThemeModeControl(store: store),
-            const SectionHeader('颜色主题', large: false),
+            SectionHeader(tr('颜色主题'), large: false),
             Panel(
               dividerIndent: 58,
               children: [
@@ -232,7 +286,6 @@ class AppearancePage extends StatelessWidget {
                   ),
               ],
             ),
-            const SectionFooter('只改变应用界面配色，与明暗模式相互独立。'),
           ]),
         ],
       );
@@ -288,17 +341,7 @@ class _PaletteRow extends StatelessWidget {
                 ),
                 const SizedBox(width: 14),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(palette.label, style: theme.textTheme.bodyLarge),
-                      Text(
-                        palette.description,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
+                  child: Text(palette.label, style: theme.textTheme.bodyLarge),
                 ),
                 AnimatedOpacity(
                   opacity: selected ? 1 : 0,
@@ -345,15 +388,14 @@ Future<void> tagSheet(
       initial: tag?['name'] as String? ?? '',
       builder: (context, name) => StatefulBuilder(
         builder: (context, setState) => SheetBody(
-          title: tag == null ? '新建标签' : '编辑标签',
-          subtitle: '标签不受文件夹限制，可跨文件夹查看规则',
+          title: tag == null ? tr('新建标签') : tr('编辑标签'),
           content: [
             TextField(
               key: const ValueKey('tag-name'),
               controller: name,
               autofocus: tag == null,
               decoration: InputDecoration(
-                hintText: '名称',
+                hintText: tr('名称'),
                 errorText: error,
                 fillColor: SpanColors.of(context).panel,
               ),
@@ -368,7 +410,7 @@ Future<void> tagSheet(
                   Semantics(
                     button: true,
                     selected: color == c,
-                    label: '颜色 #$c',
+                    label: tr('颜色 #{color}', {'color': c}),
                     child: InkResponse(
                       onTap: () => setState(() => color = c),
                       radius: 24,
@@ -402,7 +444,7 @@ Future<void> tagSheet(
               Panel(
                 children: [
                   ValueRow(
-                    '删除标签',
+                    tr('删除标签'),
                     icon: Icons.delete_outline,
                     color: Theme.of(context).colorScheme.error,
                     chevron: false,
@@ -415,17 +457,17 @@ Future<void> tagSheet(
           actions: [
             OutlinedButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
+              child: Text(tr('取消')),
             ),
             FilledButton(
               onPressed: () {
                 if (name.text.trim().isEmpty) {
-                  setState(() => error = '请填写名称');
+                  setState(() => error = tr('请填写名称'));
                   return;
                 }
                 Navigator.pop(context, name.text.trim());
               },
-              child: Text(tag == null ? '创建' : '保存'),
+              child: Text(tag == null ? tr('创建') : tr('保存')),
             ),
           ],
         ),
@@ -436,9 +478,9 @@ Future<void> tagSheet(
   if (result == '__delete__') {
     if (await confirm(
           context,
-          '删除标签「${tag!['name']}」？',
-          '规则保留，只移除这个标签的关联。',
-          action: '删除',
+          tr('删除标签「{name}」？', {'name': tag!['name']}),
+          tr('规则保留，只移除这个标签的关联。'),
+          action: tr('删除'),
           destructive: true,
         ) &&
         context.mounted) {
@@ -447,7 +489,7 @@ Future<void> tagSheet(
         () => store.mutate('delete_tag', {
           'id': tag['id'],
         }, baseRevision: baseRevision),
-        success: '标签已删除',
+        success: tr('标签已删除'),
       );
     }
     return;
@@ -476,23 +518,19 @@ class TagManager extends StatelessWidget {
         }
       }
       return SpanPage(
-        title: '标签',
+        title: tr('标签'),
         maxWidth: 680,
         floatingActionButton: AddButton(
           key: const ValueKey('new-tag'),
-          tooltip: '新建标签',
+          tooltip: tr('新建标签'),
           onPressed: () => tagSheet(context, store),
         ),
         slivers: [
           boxes([
             const SizedBox(height: 12),
             if (store.tags.isEmpty)
-              const EmptyState(
-                '还没有标签',
-                '标签不受文件夹限制，例如“家庭”“工作”“每年一次”。',
-                icon: Icons.sell_outlined,
-              )
-            else ...[
+              EmptyState(tr('还没有标签'), icon: Icons.sell_outlined)
+            else
               ...groupedTiles(
                 store.tags,
                 (t, f, l) => GroupedTile(
@@ -510,7 +548,7 @@ class TagManager extends StatelessWidget {
                           t['name'] as String,
                           value: '${counts[t['id']] ?? 0}',
                           trailing: IconButton(
-                            tooltip: '编辑标签',
+                            tooltip: tr('编辑标签'),
                             onPressed: () => tagSheet(context, store, t),
                             icon: const Icon(Icons.info_outline, size: 20),
                           ),
@@ -520,8 +558,6 @@ class TagManager extends StatelessWidget {
                   ),
                 ),
               ),
-              const SectionFooter('点按查看相关规则；长按或点 ⓘ 编辑名称与颜色。'),
-            ],
           ]),
         ],
       );
@@ -538,18 +574,18 @@ class TemplateManager extends StatelessWidget {
     builder: (context, _) {
       final templates = objects(store.state['templates']);
       return SpanPage(
-        title: '我的模板',
+        title: tr('我的模板'),
         maxWidth: 680,
         slivers: [
           boxes([
             const SizedBox(height: 12),
             if (templates.isEmpty)
-              const EmptyState(
-                '还没有模板',
-                '在规则详情的“更多”菜单中选择“存为模板”。',
+              EmptyState(
+                tr('还没有模板'),
+                message: tr('在规则详情的“更多”菜单中选择“存为模板”。'),
                 icon: Icons.bookmarks_outlined,
               )
-            else ...[
+            else
               Panel(
                 children: [
                   for (final t in templates)
@@ -558,24 +594,19 @@ class TemplateManager extends StatelessWidget {
                       subtitle: Text(configSummary(object(t['config']))),
                       onTap: () => push(
                         context,
-                        RuleEditor(
-                          store: store,
-                          initial: object(
-                            t['config'],
-                          )..['guidance'] = '来自我的模板「${t['name']}」：请核对本期日期与起算日。',
-                        ),
+                        RuleEditor(store: store, initial: templateConfig(t)),
                       ),
                       trailing: PopupMenuButton<String>(
-                        tooltip: '模板操作',
+                        tooltip: tr('模板操作'),
                         icon: const Icon(Icons.more_horiz_rounded),
                         onSelected: (v) => perform(context, () async {
                           final baseRevision = store.revision;
                           if (v == 'rename') {
                             final name = await askText(
                               context,
-                              '重命名模板',
+                              tr('重命名模板'),
                               initial: t['name'] as String,
-                              action: '保存',
+                              action: tr('保存'),
                             );
                             if (name != null) {
                               await store.mutate('save_template', {
@@ -589,9 +620,9 @@ class TemplateManager extends StatelessWidget {
                               context.mounted &&
                               await confirm(
                                 context,
-                                '删除模板「${t['name']}」？',
-                                '已用它创建的规则不受影响。',
-                                action: '删除',
+                                tr('删除模板「{name}」？', {'name': t['name']}),
+                                tr('已用它创建的规则不受影响。'),
+                                action: tr('删除'),
                                 destructive: true,
                               )) {
                             await store.mutate('delete_template', {
@@ -602,12 +633,12 @@ class TemplateManager extends StatelessWidget {
                         itemBuilder: (_) => [
                           menuItem(
                             'rename',
-                            '重命名',
+                            tr('重命名'),
                             Icons.drive_file_rename_outline,
                           ),
                           menuItem(
                             'delete',
-                            '删除',
+                            tr('删除'),
                             Icons.delete_outline,
                             destructive: true,
                           ),
@@ -616,10 +647,6 @@ class TemplateManager extends StatelessWidget {
                     ),
                 ],
               ),
-              const SectionFooter(
-                '模板只保存配置，点按即可用它新建规则；完整复制才会保留余额与历史。模板保留保存时的日期，使用时请核对。',
-              ),
-            ],
           ]),
         ],
       );
@@ -645,13 +672,13 @@ class _ReminderPlanPageState extends State<ReminderPlanPage> {
       if (snapshot.hasError) {
         content = [
           EmptyState(
-            '无法读取提醒计划',
-            errorMessage(snapshot.error!),
+            tr('无法读取提醒计划'),
+            message: errorMessage(snapshot.error!),
             icon: Icons.error_outline,
             action: OutlinedButton(
               onPressed: () =>
                   setState(() => plan = widget.store.read('reminder_plan')),
-              child: const Text('重试'),
+              child: Text(tr('重试')),
             ),
           ),
         ];
@@ -673,9 +700,8 @@ class _ReminderPlanPageState extends State<ReminderPlanPage> {
         }
         content = [
           if (days.isEmpty)
-            const EmptyState(
-              '未来 90 天没有提醒',
-              '在规则中设置提前提醒或当天提醒后会出现在这里。',
+            EmptyState(
+              tr('未来 90 天没有提醒'),
               icon: Icons.notifications_off_outlined,
             ),
           for (final entry in days.entries) ...[
@@ -685,18 +711,26 @@ class _ReminderPlanPageState extends State<ReminderPlanPage> {
                 for (final n in entry.value)
                   ValueRow(
                     n['title'] as String,
-                    value:
-                        '事件 ${friendlyDate((n['occurrence'] as String).split('@').last, weekday: false)}',
+                    value: tr('事件 {date}', {
+                      'date': friendlyDate(
+                        (n['occurrence'] as String).split('@').last,
+                        weekday: false,
+                      ),
+                    }),
                     onTap: () =>
                         openRule(context, widget.store, n['rule'] as String),
                   ),
               ],
             ),
           ],
-          SectionFooter(snapshot.data['note'] as String),
+          SectionFooter(tr(snapshot.data['note'] as String)),
         ];
       }
-      return SpanPage(title: '提醒计划', maxWidth: 680, slivers: [boxes(content)]);
+      return SpanPage(
+        title: tr('提醒计划'),
+        maxWidth: 680,
+        slivers: [boxes(content)],
+      );
     },
   );
 }

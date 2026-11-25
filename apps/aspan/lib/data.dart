@@ -10,11 +10,14 @@ import 'dart:math';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 
+import 'l10n/l10n.dart';
+
 typedef Json = Map<String, dynamic>;
-const releaseVersion = String.fromEnvironment(
-  'ASPAN_VERSION',
-  defaultValue: '开发工作区',
-);
+const _releaseVersion = String.fromEnvironment('ASPAN_VERSION');
+
+/// The packaged version, or a label for builds from a working tree.
+String get releaseVersion =>
+    _releaseVersion.isEmpty ? tr('开发工作区') : _releaseVersion;
 
 class AspanError implements Exception {
   final String message;
@@ -60,7 +63,7 @@ class NativeApi {
     );
     if (envelope['ok'] != true) {
       throw AspanError(
-        envelope['error']?.toString() ?? '操作失败',
+        envelope['error']?.toString() ?? tr('操作失败'),
         envelope['code']?.toString() ?? 'operation_failed',
       );
     }
@@ -85,7 +88,9 @@ String invokeNative(String path, String request) {
   try {
     output = invoke(input);
     if (output.address == 0) {
-      throw StateError('原生核心未返回结果');
+      // Runs in a helper isolate, where tr returns the source text;
+      // errorMessage translates it when shown.
+      throw StateError(tr('原生核心未返回结果'));
     }
     return output.toDartString();
   } finally {
@@ -151,7 +156,7 @@ class SpanStore extends ChangeNotifier {
   Future<dynamic> mutate(String method, Json args, {int? baseRevision}) {
     final result = _pending.then((_) async {
       if (lastRefreshError != null) {
-        throw const AspanError('数据尚未刷新，请先刷新本地数据再操作');
+        throw AspanError(tr('数据尚未刷新，请先刷新本地数据再操作'));
       }
       dynamic response;
       try {

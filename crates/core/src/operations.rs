@@ -269,7 +269,7 @@ impl State {
             }
             "setting" => {
                 let key = text(&a, "key")?;
-                if !["theme", "palette", "sort", "descending", "home"].contains(&key) {
+                if !["theme", "palette", "sort", "descending", "home", "language"].contains(&key) {
                     return Err("设置项不存在".into());
                 }
                 let value = text(&a, "value")?;
@@ -278,6 +278,8 @@ impl State {
                     "palette" => ["lucent", "folio", "edition", "nocturne"].contains(&value),
                     "sort" => ["manual", "reminder", "event", "remaining"].contains(&value),
                     "descending" => ["true", "false"].contains(&value),
+                    // Interface language; `system` follows the device locales.
+                    "language" => ["system", "zh-Hans", "en", "zh-Hant"].contains(&value),
                     // Home page: every rule by due date, grouped by folder or
                     // tag, or only one existing folder or tag.
                     "home" => match value.split_once(':') {
