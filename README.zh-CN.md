@@ -20,7 +20,7 @@
   <img src="docs/images/preview-light.png" alt="ASpan 的主页、项目和我的三个页面，分别展示浅色与深色主题" width="900">
 </picture>
 
-<sub>主页 · 项目 · 我的。截图使用示例数据，由界面测试生成，不代表各设备的实机验收结果。</sub>
+<sub>主页 · 项目 · 我的。截图使用示例数据，由界面测试渲染，不代表各设备的实机验收结果。</sub>
 
 </div>
 
@@ -28,12 +28,12 @@
 
 订阅续费、证件到期、次数卡余量、家里设备的检查维护，往往分散在日历、备忘录和各个应用里，哪天该处理、还剩多少，很难一眼看清。ASpan 把这些都放进同一个本地应用：
 
-- **按周期提醒你该处理什么**：主页列出当前期需要确认的事项。
+- **一眼看到接下来的事**：主页按下一次日期列出全部规则，余量不足和置顶的排在最前。
 - **日期和余量一起记**：周期旁边就是余额、次数和有效期。
 - **每次变动都留记录**：充值、扣费和纠错都有流水可查。
 - **不需要账号，不联网**：数据只保存在你的设备上。
 
-如果你想把各种按周期发生的事和剩余额度集中管理，它适合你。如果你需要系统通知、精确到时刻的提醒或多设备同步，目前还做不到。界面目前只有简体中文。支持 Android 7.0+ 和 Windows 10／11 x64。
+如果你想把各种按周期发生的事和剩余额度集中管理，它适合你。如果你需要系统通知、精确到时刻的提醒或多设备同步，目前还做不到。界面有简体中文、English 和繁體中文。支持 Android 7.0+ 和 Windows 10／11 x64。
 
 ## 功能
 
@@ -43,21 +43,21 @@
 - **每次变动都有记录**：确认完成、充值或扣费后记录流水；纠错保留原始记录与修正过程，预测不会直接记账。
 - **数据保存在本机**：导出和恢复完整 JSON 备份；恢复前先检查备份，并保留恢复前的检查点。
 - **适应手机与桌面**：澄光、纸境、墨序、曜夜四套配色，明暗模式可单独切换；窄屏用悬浮导航，宽屏用侧栏。
+- **三种界面语言**：简体中文、English、繁體中文，默认跟随系统语言，也可以手动指定。
 - **开放源码**：原创代码采用 **AGPL-3.0-only**，第三方许可与版权声明完整保留。
 
-提醒计划目前只在应用内显示，**系统通知、具体时刻、时区／夏令时和自动记账尚未实现**。恢复前的检查点暂时没有应用内回退入口。界面暂时只有简体中文。所有功能都不需要联网。
+提醒计划目前只在应用内显示，**系统通知、具体时刻、时区／夏令时和自动记账尚未实现**。恢复前的检查点暂时没有应用内回退入口。所有功能都不需要联网。
 
 ## 下载
 
-当前版本：[**rc0.0.5**](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.5)（0.0.5-rc.1+9）。在 [所有版本](https://github.com/SteamDoge/aspan/releases) 查看更新与安装包。
+当前版本：[**rc0.0.7**](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.7)（0.0.7-rc.1+11）。在 [所有版本](https://github.com/SteamDoge/aspan/releases) 查看更新与安装包。
 
 | 平台 | 下载 | 选择说明 |
 | --- | --- | --- |
-| Android 7.0+（API 24+） | [![APK ARM64](https://img.shields.io/badge/APK-ARM64-168039?logo=android)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-android-arm64-v8a.apk) | 大多数手机选择此版本 |
-| Android x86_64 | [![APK x86_64](https://img.shields.io/badge/APK-x86__64-45BF55?logo=android)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-android-x86_64.apk) | x86_64 设备／模拟器 |
-| Windows 10／11 x64 | [![Portable x64](https://img.shields.io/badge/Portable-x64-2D7D9A)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/ASpan-rc0.0.5-windows-x64.zip) | 解压完整目录，运行 `aspan.exe` |
+| Android 7.0+ · ARM64 | [![APK ARM64](https://img.shields.io/badge/APK-ARM64-168039?logo=android)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.7/ASpan-rc0.0.7-android-arm64-v8a.apk) | 大多数手机选择此版本 |
+| Android 7.0+ · x86_64 | [![APK x86_64](https://img.shields.io/badge/APK-x86__64-45BF55?logo=android)](https://github.com/SteamDoge/aspan/releases/download/rc0.0.7/ASpan-rc0.0.7-android-x86_64.apk) | x86_64 设备／模拟器 |
 
-<sub>Windows 便携包须完整解压，保留 DLL 与 `data/`；未做代码签名，首次运行可能出现系统提示。当前没有 ARMv7、Windows ARM64、macOS、Linux 或 iOS 版本。ARM64 实体机、最终 Windows 图形界面与完整设备矩阵尚未验收，范围见 [Release](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.5)。安装包可用 [SHA256SUMS](https://github.com/SteamDoge/aspan/releases/download/rc0.0.5/SHA256SUMS) 校验。</sub>
+<sub>本版只有 Android 安装包；最新的 Windows 便携包在 [rc0.0.5](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.5)（须完整解压，保留 DLL 与 `data/`，未做代码签名）。当前没有 ARMv7、Windows ARM64、macOS、Linux 或 iOS 版本。完整设备矩阵尚未验收，范围见 [Release](https://github.com/SteamDoge/aspan/releases/tag/rc0.0.7)。安装包可用 [SHA256SUMS](https://github.com/SteamDoge/aspan/releases/download/rc0.0.7/SHA256SUMS) 校验。</sub>
 
 ## 使用
 
@@ -65,9 +65,9 @@
 
 **2 · 添加规则。** 在 **项目** 页新建规则或选择场景模板，核对日期、周期与资源设置。<br><sub>模板会保留保存时的配置日期，使用前请核对。</sub>
 
-**3 · 处理当前期。** 在 **主页** 查看需要处理的事项，确认完成、充值、扣费或跳过。
+**3 · 处理当前期。** 在 **主页** 查看需要处理的事项，标记完成、充值、扣费或跳过。<br><sub>右上角菜单可以让主页按文件夹或标签分组，或只看其中一个。</sub>
 
-**4 · 备份。** 在 **我的** 调整外观、管理模板，并定期导出完整备份。
+**4 · 备份。** 在 **我的** 调整外观和语言、管理模板，并定期导出完整备份。
 
 升级前先导出备份。旧版 Debug 签名的 Android 安装包不能被新版直接覆盖；卸载 Android 应用通常会清除数据，不要用卸载代替备份。
 
@@ -93,10 +93,10 @@ cd aspan
 # 开发运行：先构建 Rust 原生库，再启动 Windows 应用
 pwsh -File scripts/run.ps1
 
-# Windows 安装包
+# Windows 便携版
 pwsh -File scripts/build.ps1 -Platform windows
 
-# Android 安装包（Debug 签名）
+# Android APK（Debug 签名）
 pwsh -File scripts/build.ps1 -Platform android -Configuration Debug `
   -AndroidSdk 'YOUR_ANDROID_SDK_DIR' -Java 'YOUR_JDK_DIR'
 ```
@@ -152,6 +152,7 @@ Windows 集成测试用 `pwsh -File scripts/native-check.ps1` 运行，使用独
 | `crates/core` | 日期周期、规则、整数精度资源、幂等记账、纠错与完整性校验 |
 | `crates/runtime` | SQLite 事务、JSON C ABI、备份与 CLI |
 | `scripts` | 检查、运行、本地构建与候选版打包校验 |
+| `docs/images` | README 使用的预览截图 |
 | `licenses` | 第三方许可证原文 |
 
 ## 隐私
